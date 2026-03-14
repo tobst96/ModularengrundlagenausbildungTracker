@@ -1,0 +1,17 @@
+[theme]
+# Primary accent color (Feuerwehr Rot)
+primaryColor = "#d32f2f"
+# Background color for the main content area (Dark Mode)
+backgroundColor = "#121212"
+# Background color for sidebar and most interactive widgets
+secondaryBackgroundColor = "#1E1E1E"
+# Color used for almost all text
+textColor = "#FFFFFF"
+# Font family
+font = "sans serif"
+
+[server]
+maxUploadSize = 1000
+
+[global]
+dataFrameSerialization = "arrow"
