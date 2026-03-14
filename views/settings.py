@@ -5,7 +5,7 @@ from datetime import datetime
 from src.database import (
     get_qualifications, create_qualification, delete_qualification, update_qualification,
     get_vehicles, create_vehicle, delete_vehicle, update_vehicle,
-    export_db_to_json, import_db_from_json
+    export_db_to_json, import_db_from_json, get_public_view_password, save_public_view_password
 )
 
 # Sichern der Seite: Nur für Admins
@@ -13,8 +13,8 @@ if st.session_state.get('username', '').lower() != 'admin':
     st.error("Zugriff verweigert. Diese Seite ist nur für Administratoren zugänglich.")
     st.stop()
     
-tab_ausb, tab_fahrz, tab_email, tab_benut, tab_wart, tab_backup = st.tabs([
-    "🎓 Ausbildungen", "🚒 Fahrzeuge", "✉️ E-Mail", "👥 Benutzer", "⚙️ Wartung", "💾 Backup"
+tab_ausb, tab_fahrz, tab_email, tab_benut, tab_sich, tab_wart, tab_backup = st.tabs([
+    "🎓 Ausbildungen", "🚒 Fahrzeuge", "✉️ E-Mail", "👥 Benutzer", "🛡️ Sicherheit", "⚙️ Wartung", "💾 Backup"
 ])
 
 # --- TAB AUSBILDUNGEN ---
@@ -393,6 +393,33 @@ with tab_benut:
                     import time
                     time.sleep(0.5)
                     st.rerun()
+
+# --- TAB SICHERHEIT ---
+with tab_sich:
+    st.subheader("Sicherheit & Zugriffscodes")
+    st.info("Hier kannst du Passwörter und Zugriffscodes konfigurieren, die nicht direkt mit Benutzerkonten verknüpft sind.")
+    
+    # --- PUBLIC VIEW PASSWORD ---
+    st.write("### 🔑 Teilnehmer-Abfrage (Public View)")
+    st.write("Dieser Code ermöglicht es Teilnehmern, ihren Ausbildungsstand abzufragen, ohne ein volles Benutzerkonto zu besitzen.")
+    
+    current_pw = get_public_view_password(1) or "feuerprofi"
+    
+    with st.form("public_view_pw_form"):
+        new_public_pw = st.text_input("Zugriffscode (z.B. Funkrufname)", value=current_pw, help="Wird für die Anmeldung im Teilnehmer-Bereich benötigt.")
+        submitted_pw = st.form_submit_button("Zugriffscode speichern", type="primary")
+        
+        if submitted_pw:
+            if not new_public_pw.strip():
+                st.error("Der Zugriffscode darf nicht leer sein.")
+            else:
+                ok, err = save_public_view_password(1, new_public_pw.strip())
+                if ok:
+                    st.success("Zugriffscode erfolgreich aktualisiert!")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error(f"Fehler beim Speichern: {err}")
 
 # --- TAB WARTUNG ---
 with tab_wart:
