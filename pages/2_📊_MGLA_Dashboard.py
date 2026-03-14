@@ -85,14 +85,16 @@ if st.query_params.get("view") == "public":
         st.stop()
         
     # 2. Wenn Parameter vorliegen -> Passwort-Abfrage
-    # In Public View the user should enter the shared fixed password '15-52-1'
+    # Public View password is stored in the database (configurable via Settings)
+    from src.database import get_public_view_password
+    _public_pw = get_public_view_password(1) or "feuerprofi"
     if not st.session_state.get(f"public_auth_{search_name}_{search_bday}"):
         with st.form("public_auth_form"):
             st.warning(f"Sichere Ansicht für: **{search_name}** ({search_bday})")
             pwd = st.text_input("Passwort (Einheitscode)", type="password")
             auth_submit = st.form_submit_button("Freischalten")
             if auth_submit:
-                if pwd == "15-52-1":
+                if pwd == _public_pw:
                     st.session_state[f"public_auth_{search_name}_{search_bday}"] = True
                     st.success("Erfolgreich autorisiert. Einen Moment...")
                     st.rerun()
@@ -244,8 +246,8 @@ if st.query_params.get("view") == "public":
 def setup_db():
     try:
         init_db()
-        init_admin_user("admin", "Tobi&67114")
-        init_admin_user("Max", "Max")
+        admin_pass = os.environ.get("ADMIN_PASSWORD", "admin")
+        init_admin_user("admin", admin_pass)
         return True, None
     except Exception as e:
         return False, str(e)

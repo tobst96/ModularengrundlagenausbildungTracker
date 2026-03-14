@@ -33,7 +33,8 @@ def init_db():
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS units (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE NOT NULL
+                    name TEXT UNIQUE NOT NULL,
+                    public_view_password TEXT DEFAULT 'feuerprofi'
                 );
                 
                 CREATE TABLE IF NOT EXISTS stundennachweis_config (
@@ -212,6 +213,9 @@ def init_db():
 
             # --- Auto-Migrations for older schemas (suppress errors if columns already exist) ---
             try: conn.execute("ALTER TABLE vehicles ADD COLUMN token TEXT")
+            except Exception: pass
+            
+            try: conn.execute("ALTER TABLE units ADD COLUMN public_view_password TEXT DEFAULT 'feuerprofi'")
             except Exception: pass
             
             # Populate token for existing vehicles
@@ -1899,3 +1903,30 @@ def update_promotion_config(unit_id: int, qs1: int, qs2: int, qs3: int) -> bool:
         return False
     finally:
         if 'conn' in locals() and conn: conn.close()
+
+# --- PUBLIC VIEW PASSWORD ---
+
+def get_public_view_password(unit_id: int) -> Optional[str]:
+    """Gets the public view password for a unit."""
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT public_view_password FROM units WHERE id = ?", (unit_id,)).fetchone()
+        return row['public_view_password'] if row else None
+    except Exception as e:
+        logger.error(f"Error getting public view password: {e}")
+        return None
+    finally:
+        conn.close()
+
+def save_public_view_password(unit_id: int, password: str) -> Tuple[bool, str]:
+    """Saves the public view password for a unit."""
+    with _lock:
+        conn = get_connection()
+        try:
+            conn.execute("UPDATE units SET public_view_password = ? WHERE id = ?", (password, unit_id))
+            conn.commit()
+            return True, ""
+        except Exception as e:
+            return False, str(e)
+        finally:
+            conn.close()
