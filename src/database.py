@@ -356,9 +356,6 @@ def get_login_history(limit: int = 50) -> list[dict]:
             conn.close()
 
 def verify_user(username, password) -> tuple[bool, Optional[int], Optional[str], bool]:
-    if username == "admin" and password == "adminadmin":
-        return True, None, None, True
-        
     with _lock:
         conn = get_connection()
         try:
@@ -384,6 +381,36 @@ def verify_user(username, password) -> tuple[bool, Optional[int], Optional[str],
             return False, None, None, False
         finally:
             conn.close()
+
+def change_password(username: str, new_password: str) -> Tuple[bool, str]:
+    """Changes the password for a user."""
+    with _lock:
+        conn = get_connection()
+        try:
+            hashed = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            conn.execute("UPDATE users SET password_hash = ? WHERE username = ?", (hashed, username))
+            conn.commit()
+            return True, ""
+        except Exception as e:
+            return False, str(e)
+        finally:
+            conn.close()
+
+def is_default_password(username: str) -> bool:
+    """Checks if a user still has the default 'admin' password."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT password_hash FROM users WHERE username = ?", (username,))
+        user = cursor.fetchone()
+        if user:
+            try:
+                return bcrypt.checkpw(b'admin', user['password_hash'].encode('utf-8'))
+            except (ValueError, Exception):
+                return False
+        return False
+    finally:
+        conn.close()
 
 def get_all_users() -> list[dict]:
     with _lock:

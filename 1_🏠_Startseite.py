@@ -151,7 +151,7 @@ if seq_server_url:
 
 logger = logging.getLogger(__name__)
 
-from src.database import verify_user, log_login, init_db, delete_expired_participants, export_db_to_json
+from src.database import verify_user, log_login, init_db, delete_expired_participants, export_db_to_json, is_default_password, change_password
 try:
     from src.database import get_connection
     init_db()
@@ -369,6 +369,33 @@ def login():
 if not st.session_state.authenticated:
     login()
     st.stop()
+
+# --- FORCED PASSWORD CHANGE (if default password is still set) ---
+if st.session_state.authenticated and not st.session_state.get('is_token_auth', False):
+    current_user = st.session_state.get('username', '')
+    if current_user and is_default_password(current_user):
+        st.warning("🔒 **Sicherheitshinweis:** Du verwendest noch das Standard-Passwort. Bitte lege jetzt ein neues Passwort fest.")
+        with st.form("force_password_change"):
+            new_pw = st.text_input("Neues Passwort", type="password")
+            new_pw_confirm = st.text_input("Neues Passwort bestätigen", type="password")
+            submitted = st.form_submit_button("Passwort ändern", type="primary", use_container_width=True)
+            if submitted:
+                if not new_pw or len(new_pw) < 4:
+                    st.error("Das Passwort muss mindestens 4 Zeichen lang sein.")
+                elif new_pw == "admin":
+                    st.error("Das neue Passwort darf nicht 'admin' sein.")
+                elif new_pw != new_pw_confirm:
+                    st.error("Die Passwörter stimmen nicht überein.")
+                else:
+                    ok, err = change_password(current_user, new_pw)
+                    if ok:
+                        st.success("✅ Passwort erfolgreich geändert!")
+                        import time
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error(f"Fehler: {err}")
+        st.stop()
 
 
 # Initialize pages
