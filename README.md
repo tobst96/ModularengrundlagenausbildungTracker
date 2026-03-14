@@ -116,7 +116,7 @@ streamlit run 1_🏠_Startseite.py
 
 Die App ist anschließend unter **http://localhost:8501** erreichbar.
 
-> **Erster Login:** Beim ersten Start wird automatisch ein Admin-Benutzer `admin` mit Passwort `admin` angelegt. **Bitte sofort ändern!**
+> **Erster Login:** Beim ersten Start wird automatisch ein Admin-Benutzer `admin` mit Passwort `admin` angelegt. **Bitte sofort ändern!** Das Passwort kann über die Umgebungsvariable `ADMIN_PASSWORD` gesetzt werden.
 
 ---
 
