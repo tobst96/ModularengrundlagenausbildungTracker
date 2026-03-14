@@ -151,12 +151,14 @@ if seq_server_url:
 
 logger = logging.getLogger(__name__)
 
-from src.database import verify_user, log_login, init_db, delete_expired_participants, export_db_to_json, is_default_password, change_password
+from src.database import verify_user, log_login, init_db, delete_expired_participants, export_db_to_json, is_default_password, change_password, init_admin_user
 try:
     from src.database import get_connection
     init_db()
+    admin_pass = os.environ.get("ADMIN_PASSWORD", "admin")
+    init_admin_user("admin", admin_pass)
     db_ok = True
-    logger.info("Database initialized successfully.")
+    logger.info("Database and Admin user initialized successfully.")
 except Exception as e:
     logger.error(f"DB Error during initialization: {e}")
     db_ok = False
