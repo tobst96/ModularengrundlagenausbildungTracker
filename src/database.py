@@ -467,6 +467,19 @@ def create_user_with_unit(username, password, unit_id) -> tuple[bool, str]:
         finally:
             conn.close()
 
+def update_user_password(user_id: int, new_password: str) -> tuple[bool, str]:
+    with _lock:
+        conn = get_connection()
+        try:
+            hashed = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hashed, user_id))
+            conn.commit()
+            return True, ""
+        except Exception as e:
+            return False, str(e)
+        finally:
+            conn.close()
+
 def delete_user(user_id: int) -> tuple[bool, str]:
     with _lock:
         conn = get_connection()

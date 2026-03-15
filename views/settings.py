@@ -5,7 +5,8 @@ from datetime import datetime
 from src.database import (
     get_qualifications, create_qualification, delete_qualification, update_qualification,
     get_vehicles, create_vehicle, delete_vehicle, update_vehicle,
-    export_db_to_json, import_db_from_json, get_public_view_password, save_public_view_password
+    export_db_to_json, import_db_from_json, get_public_view_password, save_public_view_password,
+    get_feueron_config, save_feueron_config, update_user_password
 )
 
 # Sichern der Seite: Nur für Admins
@@ -13,8 +14,8 @@ if st.session_state.get('username', '').lower() != 'admin':
     st.error("Zugriff verweigert. Diese Seite ist nur für Administratoren zugänglich.")
     st.stop()
     
-tab_ausb, tab_fahrz, tab_email, tab_benut, tab_sich, tab_wart, tab_backup = st.tabs([
-    "🎓 Ausbildungen", "🚒 Fahrzeuge", "✉️ E-Mail", "👥 Benutzer", "🛡️ Sicherheit", "⚙️ Wartung", "💾 Backup"
+tab_ausb, tab_fahrz, tab_email, tab_benut, tab_sync, tab_sich, tab_wart, tab_backup = st.tabs([
+    "🎓 Ausbildungen", "🚒 Fahrzeuge", "✉️ E-Mail", "👥 Benutzer", "🔄 Auto-Download & Sync", "🛡️ Sicherheit", "⚙️ Wartung", "💾 Backup"
 ])
 
 # --- TAB AUSBILDUNGEN ---
@@ -325,74 +326,186 @@ with tab_benut:
                         import time
                         time.sleep(1)
                         st.rerun()
-                    else:
-                        st.error(f"Fehler: {err}")
-
     users_list = get_all_users()
     if not users_list:
         st.warning("Keine Benutzer gefunden (außer dem System-Admin).")
     else:
-        import pandas as pd
-        df_users = pd.DataFrame(users_list)
+        st.write("---")
+        st.write("**Aktuelle Benutzer**")
         
-        # Cast is_admin to boolean for checkbox
-        df_users['is_admin'] = df_users['is_admin'].astype(bool)
+        from src.database import delete_user, update_user_admin_status
         
-        display_cols_users = ["id", "username", "is_admin"]
-        df_users = df_users[[col for col in display_cols_users if col in df_users.columns]]
-        
-        col_config_users = {
-            "id": None, 
-            "username": st.column_config.TextColumn("Benutzername", disabled=True),
-            "is_admin": st.column_config.CheckboxColumn("Ist Admin?", default=False)
-        }
-
-        edited_df_users = st.data_editor(
-            df_users,
-            column_config=col_config_users,
-            use_container_width=True,
-            num_rows="dynamic",
-            key="users_editor",
-            hide_index=True
-        )
-        
-        if not df_users.equals(edited_df_users):
-            if st.button("💾 Admin-Rechte speichern", type="primary", use_container_width=True):
-                from src.database import delete_user
-                errors = []
+        for u in users_list:
+            is_admin_user = (u['username'].lower() == 'admin')
+            with st.expander(f"👤 {u['username']} {'(System-Admin)' if is_admin_user else ''}"):
+                col_info, col_actions = st.columns([2, 1])
                 
-                # Check for modified rows
-                for idx, row in edited_df_users.iterrows():
-                    u_id = row.get("id")
-                    if pd.isna(u_id):
-                        continue # Grid cannot add users directly due to missing password field
-                        
-                    is_admin_flag = row["is_admin"]
+                with col_info:
+                    st.write(f"**Benutzername:** `{u['username']}`")
                     
-                    # Find original row
-                    orig_row = df_users[df_users['id'] == u_id]
-                    if not orig_row.empty:
-                        orig_admin_flag = orig_row.iloc[0]["is_admin"]
-                        if is_admin_flag != orig_admin_flag:
-                            ok, err = update_user_admin_status(int(u_id), bool(is_admin_flag))
-                            if not ok: errors.append(err)
-                            
-                # Check for deleted rows
-                original_user_ids = set(df_users["id"].dropna().tolist())
-                current_user_ids = set(edited_df_users["id"].dropna().tolist())
-                deleted_user_ids = original_user_ids - current_user_ids
-                
-                for d_id in deleted_user_ids:
-                    ok, err = delete_user(int(d_id))
-                    if not ok: errors.append(err)
-                        
-                if errors:
-                    st.error("Einige Fehler traten auf:\\n" + "\\n".join(set(errors)))
-                else:
-                    st.success("Benutzer erfolgreich aktualisiert!")
-                    import time
-                    time.sleep(0.5)
+                    # Admin Toggle
+                    current_admin_status = bool(u['is_admin'])
+                    new_admin_status = st.toggle(
+                        "Administrator-Rechte", 
+                        value=current_admin_status, 
+                        key=f"toggle_admin_{u['id']}",
+                        disabled=is_admin_user # cannot change admin status of 'admin'
+                    )
+                    
+                    if new_admin_status != current_admin_status:
+                        ok, err = update_user_admin_status(u['id'], new_admin_status)
+                        if ok:
+                            st.success("Berechtigungen aktualisiert!")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.error(f"Fehler: {err}")
+
+                with col_actions:
+                    # Delete Button (not for system admin)
+                    if not is_admin_user:
+                        if st.button("🗑️ Benutzer löschen", key=f"del_u_{u['id']}", type="secondary", use_container_width=True):
+                            ok, err = delete_user(u['id'])
+                            if ok:
+                                st.success("Benutzer gelöscht.")
+                                time.sleep(0.5)
+                                st.rerun()
+                            else:
+                                st.error(f"Fehler: {err}")
+                    else:
+                        st.info("System-Konto")
+
+                st.divider()
+                st.write("**Passwort ändern**")
+                with st.form(f"pw_change_modern_{u['id']}", clear_on_submit=True):
+                    new_pwd = st.text_input("Neues Passwort", type="password", key=f"new_pw_mod_{u['id']}")
+                    pw_submit = st.form_submit_button("Passwort aktualisieren", use_container_width=True)
+                    if pw_submit:
+                        if new_pwd:
+                            ok, err = update_user_password(u['id'], new_pwd)
+                            if ok:
+                                st.success(f"Passwort für {u['username']} erfolgreich geändert!")
+                            else:
+                                st.error(f"Fehler: {err}")
+                        else:
+                            st.warning("Bitte ein Passwort eingeben.")
+
+# --- TAB AUTO-DOWNLOAD & SYNC ---
+with tab_sync:
+    from src.database import get_feueron_config, save_feueron_config
+    st.subheader("🔄 FeuerOn Auto-Download")
+    st.caption("Täglich automatisch auf feueron.de einloggen, PDF herunterladen und importieren.")
+    
+    sel_uid = 1
+    cfg = get_feueron_config(sel_uid)
+    
+    st.divider()
+    st.subheader("🔑 FeuerOn Zugangsdaten")
+    
+    with st.form(key="feueron_config_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            f_org = st.text_input(
+                "Organisation (Dropdown-Wert)",
+                value=cfg.get('feueron_org', '') if cfg else '',
+                placeholder="z.B. Westerstede, Stadt",
+                help="Genaue Bezeichnung wie sie in FeuerOn erscheint"
+            )
+            f_org_id = st.text_input(
+                "Organisations-ID",
+                value=cfg.get('feueron_org_id', '') if cfg else '',
+                placeholder="z.B. 3455",
+                help="Interne ID aus FeuerOn. Für Westerstede, OF = 3455"
+            )
+            f_user = st.text_input(
+                "Benutzername",
+                value=cfg.get('feueron_username', '') if cfg else '',
+                placeholder="FeuerOn Benutzername"
+            )
+            f_pass = st.text_input(
+                "Passwort",
+                value=cfg.get('feueron_password', '') if cfg else '',
+                type="password",
+                placeholder="FeuerOn Passwort"
+            )
+        with col2:
+            f_hour = st.number_input(
+                "Uhrzeit (Stunde)",
+                min_value=0, max_value=23,
+                value=cfg.get('sync_hour', 3) if cfg else 3
+            )
+            f_minute = st.number_input(
+                "Uhrzeit (Minute)",
+                min_value=0, max_value=59,
+                value=cfg.get('sync_minute', 0) if cfg else 0
+            )
+            f_enabled = st.toggle(
+                "Auto-Download aktiv",
+                value=bool(cfg.get('sync_enabled', False)) if cfg else False
+            )
+        
+        save_btn = st.form_submit_button("💾 Synchronisation speichern", use_container_width=True)
+        if save_btn:
+            ok, err = save_feueron_config(
+                sel_uid, f_org, f_org_id, f_user, f_pass,
+                int(f_hour), int(f_minute), f_enabled
+            )
+            if ok:
+                try:
+                    from src.feueron_downloader import _reload_jobs
+                    _reload_jobs()
+                except:
+                    pass
+                st.success(f"✅ Gespeichert! {'Auto-Download ist aktiv.' if f_enabled else 'Auto-Download ist deaktiviert.'}")
+            else:
+                st.error(f"Fehler: {err}")
+    
+    st.divider()
+    st.subheader("📊 Sync-Status")
+    
+    cfg_live = get_feueron_config(sel_uid)
+    if cfg_live:
+        s = cfg_live.get('last_sync_status')
+        s_msg = cfg_live.get('last_sync_message', '')
+        s_time = cfg_live.get('last_sync_at', '')
+        
+        if s == 'success':
+            st.success(f"✅ Letzter Sync: {s_time}")
+            if s_msg: st.caption(s_msg)
+        elif s == 'error':
+            st.error(f"❌ Fehler beim letzten Sync: {s_time}")
+            if s_msg: st.code(s_msg, language=None)
+        elif s == 'running':
+            st.info(f"⏳ Sync läuft gerade... ({s_msg})")
+        else:
+            st.info("Noch kein Sync durchgeführt.")
+        
+        if cfg_live.get('sync_enabled') and cfg_live.get('sync_hour') is not None:
+            next_h = cfg_live['sync_hour']
+            next_m = cfg_live.get('sync_minute', 0)
+            st.caption(f"🕰️ Geplanter täglicher Sync: {next_h:02d}:{next_m:02d} Uhr")
+    
+    st.divider()
+    # Manual Trigger
+    col_btn1, col_btn2 = st.columns([2, 1])
+    with col_btn1:
+        if st.button("▶️ Jetzt manuell ausführen", use_container_width=True, type="primary"):
+            if not cfg_live or not cfg_live.get('feueron_username'):
+                st.error("Bitte zuerst Zugangsdaten speichern!")
+            else:
+                from src.feueron_downloader import run_download as _run_dl
+                with st.spinner("⏳ Synchronisiere mit FeuerOn..."):
+                    ok, msg = _run_dl(sel_uid)
+                if ok:
+                    st.success(f"{msg}")
+                    st.cache_data.clear()
+                    time.sleep(2)
                     st.rerun()
+                else:
+                    st.error(f"❌ Fehler: {msg}")
+    with col_btn2:
+        if st.button("🔄 Status aktualisieren", use_container_width=True):
+            st.rerun()
 
 # --- TAB SICHERHEIT ---
 with tab_sich:

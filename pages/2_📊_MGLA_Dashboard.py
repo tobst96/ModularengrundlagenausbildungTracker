@@ -26,7 +26,7 @@ from src.database import (
     export_unit_backup, import_unit_backup, get_all_person_qs_status_cached, 
     get_latest_upload_data_cached, get_person_qs_status_cached, update_person_qs_status,
     log_login, get_login_history, get_feueron_config, save_feueron_config, get_all_feueron_configs,
-    save_pdf_cache, get_pdf_cache, get_connection
+    save_pdf_cache, get_pdf_cache, get_connection, update_user_password, update_user_admin_status
 )
 from streamlit_cookies_manager import EncryptedCookieManager
 
@@ -501,7 +501,7 @@ with st.sidebar:
     views = ["Gesamtübersicht", "QS1 - Einsatzfähigkeit", "QS2 - Truppmitglied", "QS3 - Truppführende/r", "EStabK", "🎓 Lehrgangs-Check"]
     if is_admin:
         views.append("⚙️ Admin-Bereich")
-        
+    
     for v in views:
         is_active = (st.session_state.main_view == v)
         if st.button(f"👉 {v}" if is_active else v, use_container_width=True, type="primary" if is_active else "secondary"):
@@ -584,34 +584,8 @@ if view_mode == "⚙️ Admin-Bereich" and is_admin:
     
     st.markdown("---")
 
-    tab_users, tab_persons, tab_logins, tab_autodownload, tab_promotion = st.tabs(["Benutzer", "Personen in DB", "Login-Historie", "🔄 Auto-Download", "🎓 Hochstufung"])
+    tab_persons, tab_logins, tab_promotion = st.tabs(["Personen in DB", "Login-Historie", "🎓 Hochstufung"])
     
-    with tab_users:
-        st.subheader("Benutzer verwalten")
-        with st.form("new_user_form"):
-            nu_name = st.text_input("Benutzername")
-            nu_pass = st.text_input("Passwort", type="password")
-            submitted = st.form_submit_button("Benutzer anlegen")
-            if submitted:
-                if nu_name and nu_pass:
-                    ok, err = create_user_with_unit(nu_name, nu_pass, 1)
-                    if ok:
-                        st.success("Benutzer erstellt!")
-                        time.sleep(0.5)
-                        st.rerun()
-                    else:
-                        st.error(f"Fehler: {err}")
-                        
-        st.divider()
-        st.write("**Alle Benutzer**")
-        all_u = get_all_users()
-        for u in all_u:
-            col1, col2 = st.columns([7, 1])
-            col1.write(f"👤 **{u['username']}**")
-            if u['username'] != 'admin':
-                if col2.button("🗑️", key=f"del_user_{u['id']}", help="Benutzer löschen"):
-                    delete_user(u['id'])
-                    st.rerun()
                     
     with tab_persons:
         st.subheader("Personen in der Datenbank")
@@ -653,132 +627,8 @@ if view_mode == "⚙️ Admin-Bereich" and is_admin:
 
 
     # ---- AUTO-DOWNLOAD TAB ----
-    with tab_autodownload:
-        st.subheader("🔄 FeuerOn Auto-Download")
-        st.caption("Täglich automatisch auf feueron.de einloggen, PDF herunterladen und importieren.")
-        
-        sel_uid = 1
-        cfg = get_feueron_config(sel_uid)
-        
-        st.divider()
-        st.subheader("🔑 FeuerOn Zugangsdaten")
-        
-        with st.form(key="feueron_config_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                f_org = st.text_input(
-                    "Organisation (Dropdown-Wert)",
-                    value=cfg.get('feueron_org', '') if cfg else '',
-                    placeholder="z.B. Westerstede, Stadt",
-                    help="Genaue Bezeichnung wie sie in FeuerOn erscheint"
-                )
-                f_org_id = st.text_input(
-                    "Organisations-ID",
-                    value=cfg.get('feueron_org_id', '') if cfg else '',
-                    placeholder="z.B. 3455",
-                    help="Interne ID aus FeuerOn. Für Westerstede, OF = 3455"
-                )
-                f_user = st.text_input(
-                    "Benutzername",
-                    value=cfg.get('feueron_username', '') if cfg else '',
-                    placeholder="FeuerOn Benutzername"
-                )
-                f_pass = st.text_input(
-                    "Passwort",
-                    value=cfg.get('feueron_password', '') if cfg else '',
-                    type="password",
-                    placeholder="FeuerOn Passwort"
-                )
-            with col2:
-                f_hour = st.number_input(
-                    "Uhrzeit (Stunde)",
-                    min_value=0, max_value=23,
-                    value=cfg.get('sync_hour', 3) if cfg else 3
-                )
-                f_minute = st.number_input(
-                    "Uhrzeit (Minute)",
-                    min_value=0, max_value=59,
-                    value=cfg.get('sync_minute', 0) if cfg else 0
-                )
-                f_enabled = st.toggle(
-                    "Auto-Download aktiv",
-                    value=bool(cfg.get('sync_enabled', False)) if cfg else False
-                )
-            
-            save_btn = st.form_submit_button("💾 Einstellungen speichern", use_container_width=True)
-            if save_btn:
-                ok, err = save_feueron_config(
-                    sel_uid, f_org, f_org_id, f_user, f_pass,
-                    int(f_hour), int(f_minute), f_enabled
-                )
-                if ok:
-                    # Scheduler-Jobs neu laden
-                    if _reload_jobs:
-                        try:
-                            _reload_jobs()
-                        except Exception as e:
-                            logger.warning(f"Scheduler reload: {e}")
-                    st.success(f"✅ Gespeichert! {'Auto-Download ist aktiv.' if f_enabled else 'Auto-Download ist deaktiviert.'}")
-                else:
-                    st.error(f"Fehler: {err}")
-        
-        st.divider()
-        st.subheader("📊 Sync-Status")
-        
-        # Aktuellen Status anzeigen (immer neu laden)
-        cfg_live = get_feueron_config(sel_uid)
-        if cfg_live:
-            s = cfg_live.get('last_sync_status')
-            s_msg = cfg_live.get('last_sync_message', '')
-            s_time = cfg_live.get('last_sync_at', '')
-            
-            if s == 'success':
-                st.success(f"✅ Letzter Sync: {s_time}")
-                if s_msg:
-                    st.caption(s_msg)
-            elif s == 'error':
-                st.error(f"❌ Fehler beim letzten Sync: {s_time}")
-                if s_msg:
-                    st.code(s_msg, language=None)
-            elif s == 'running':
-                st.info(f"⏳ Sync läuft gerade... ({s_msg})")
-            else:
-                st.info("Noch kein Sync durchgeführt.")
-            
-            if cfg_live.get('sync_enabled') and cfg_live.get('sync_hour') is not None:
-                next_h = cfg_live['sync_hour']
-                next_m = cfg_live.get('sync_minute', 0)
-                st.caption(f"🕰️ Geplanter täglicher Sync: {next_h:02d}:{next_m:02d} Uhr")
-        
-        st.divider()
-        # Manueller Trigger
-        col_btn1, col_btn2 = st.columns([2, 1])
-        with col_btn1:
-            if st.button("▶️ Jetzt manuell ausführen", use_container_width=True, type="primary"):
-                if not cfg_live or not cfg_live.get('feueron_username'):
-                    st.error("Bitte zuerst Zugangsdaten speichern!")
-                else:
-                    from src.feueron_downloader import run_download as _run_dl
-                    with st.spinner("⏳ Verbinde mit FeuerOn und lade Trainingsdaten herunter... (Das kann ca. 30s dauern)"):
-                        ok, msg = _run_dl(sel_uid)
-                    
-                    if ok:
-                        st.success(f"{msg}")
-                        # Verhalte dich exakt so wie beim manuellen PDF Upload: Lade die neu gespeicherten DB-Daten und update die Session
-                        from src.database import get_latest_upload_data_cached
-                        from src.data import process_training_data
-                        st.cache_data.clear()
-                        latest = get_latest_upload_data_cached(unit_id=sel_uid)
-                        if latest:
-                            st.session_state.df = process_training_data(latest)
-                            st.session_state.last_loaded_file = 'loaded_from_db_auto'
-                        time.sleep(2)
-                        st.rerun()
-                    else:
-                        st.error(f"❌ Fehler: {msg}")
-        with col_btn2:
-            if st.button("🔄 Status aktualisieren", use_container_width=True):
-                st.rerun()
+    st.stop() # Main content ends here for Admin tab
+
 
     # ---- PROMOTION CONFIG TAB ----
     with tab_promotion:
