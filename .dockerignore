@@ -2,6 +2,6 @@ data/
 .venv/
 __pycache__/
 *.pyc
-.git/
+
 .env
 .pytest_cache/

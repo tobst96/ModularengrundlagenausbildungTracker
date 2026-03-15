@@ -1,5 +1,9 @@
 import subprocess
 import os
+import sys
+import logging
+
+logger = logging.getLogger(__name__)
 
 def get_current_branch():
     try:
@@ -15,15 +19,23 @@ def get_local_commit():
 
 def get_remote_commit():
     try:
-        subprocess.run(["git", "fetch", "origin"], check=True, capture_output=True)
-        return subprocess.check_output(["git", "rev-parse", "--short", "origin/main"]).decode().strip()
-    except:
-        try:
-            # Fallback to current branch if main fails
-            branch = get_current_branch()
-            return subprocess.check_output(["git", "rev-parse", "--short", f"origin/{branch}"]).decode().strip()
-        except:
+        res = subprocess.run(["git", "fetch", "origin"], capture_output=True, text=True)
+        if res.returncode != 0:
+            logger.error(f"Git fetch failed: {res.stderr}")
             return "Unknown"
+            
+        branch = get_current_branch()
+        # Try main first, then fallback to current branch
+        for b in ["main", branch]:
+            res = subprocess.run(["git", "rev-parse", "--short", f"origin/{b}"], capture_output=True, text=True)
+            if res.returncode == 0:
+                return res.stdout.strip()
+                
+        logger.error(f"Git rev-parse failed for main and {branch}")
+        return "Unknown"
+    except Exception as e:
+        logger.error(f"Unexpected error in get_remote_commit: {e}")
+        return "Unknown"
 
 def is_update_available():
     local = get_local_commit()
@@ -67,6 +79,11 @@ def check_for_updates():
 
 def perform_auto_update():
     """Executes the full update process and restarts the server."""
+    # Check if we are in a git repository
+    if not os.path.exists(".git"):
+        logger.error("Auto-update failed: Not a git repository (.git folder missing).")
+        return False, "This installation is not a git repository. Auto-updates require a git-based installation."
+
     ok_pull, msg_pull = run_git_pull()
     if not ok_pull:
         return False, f"Git Pull failed: {msg_pull}"
@@ -75,8 +92,27 @@ def perform_auto_update():
     if not ok_pip:
         return False, f"Pip install failed: {msg_pip}"
     
-    # Trigger server restart (Docker will restart the container if exit code is 0 and restart policy is set)
+    # Trigger server restart
     import os
     import sys
-    os._exit(0)
+    
+    logger.info("Restarting server after successful update...")
+    
+    # Prepare restart command
+    # Using sys.executable -m streamlit run ensures we use the correct environment
+    script_path = os.path.abspath("1_🏠_Startseite.py")
+    
+    # We try to preserve original arguments if possible
+    # In Streamlit, sys.argv usually contains [script_name, arg1, arg2, ...]
+    args = [sys.executable, "-m", "streamlit", "run", script_path] + sys.argv[1:]
+    
+    # Re-run with the same arguments if we're in a terminal or docker
+    # We use os.execv to replace the current process
+    try:
+        os.execv(sys.executable, args)
+    except Exception as e:
+        logger.error(f"Failed to execv: {e}")
+        # Fallback to exit(0) for Docker to handle if execv fails
+        os._exit(0)
+    
     return True, "Update initiated"
