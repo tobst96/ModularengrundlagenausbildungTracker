@@ -46,9 +46,18 @@ def is_update_available():
 
 def run_git_pull():
     try:
+        # Stash local changes to avoid merge conflicts
+        subprocess.run(["git", "stash"], capture_output=True, text=True)
+        
         result = subprocess.run(["git", "pull", "origin", get_current_branch()], capture_output=True, text=True, check=True)
+        
+        # Optional: Try to pop stash if we want to preserve local tweaks
+        # subprocess.run(["git", "stash", "pop"], capture_output=True, text=True)
+        
         return True, result.stdout
     except subprocess.CalledProcessError as e:
+        # If pull fails, we still try to pop stash to restore local state
+        subprocess.run(["git", "stash", "pop"], capture_output=True, text=True)
         return False, e.stderr
     except Exception as e:
         return False, str(e)
@@ -92,9 +101,6 @@ def perform_auto_update():
     if not ok_pip:
         return False, f"Pip install failed: {msg_pip}"
     
-    # Trigger server restart
-    import os
-    import sys
     
     logger.info("Restarting server after successful update...")
     

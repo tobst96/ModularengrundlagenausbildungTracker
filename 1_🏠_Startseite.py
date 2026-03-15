@@ -1,4 +1,8 @@
 import streamlit as st
+import src.db_base as storage
+import src.sync_updater as sync_upd
+import os
+import sys
 
 st.set_page_config(
     page_title="FeuerProfi",
@@ -151,7 +155,6 @@ if seq_server_url:
 
 logger = logging.getLogger(__name__)
 
-import src.db_base as storage
 try:
     storage.init_db()
     admin_pass = os.environ.get("ADMIN_PASSWORD", "admin")
@@ -231,7 +234,6 @@ if "scheduler" not in st.session_state:
     scheduler.add_job(check_unsent_reports, 'interval', minutes=5)
     
     # --- UPDATE JOBS ---
-    import src.sync_updater as sync_upd
     # Daily update check at 02:00
     scheduler.add_job(sync_upd.check_for_updates, 'cron', hour=2, minute=0)
     
