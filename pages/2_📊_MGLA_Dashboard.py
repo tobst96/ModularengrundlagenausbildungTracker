@@ -26,7 +26,7 @@ from src.database import (
     export_unit_backup, import_unit_backup, get_all_person_qs_status_cached, 
     get_latest_upload_data_cached, get_person_qs_status_cached, update_person_qs_status,
     log_login, get_login_history, get_feueron_config, save_feueron_config, get_all_feueron_configs,
-    save_pdf_cache, get_pdf_cache
+    save_pdf_cache, get_pdf_cache, get_connection
 )
 from streamlit_cookies_manager import EncryptedCookieManager
 
@@ -815,11 +815,29 @@ if view_mode == "🎓 Lehrgangs-Check":
     if st.session_state.df is not None:
         df = st.session_state.df
         
+        # Determine actual current rank for each person (consistent with dashboard)
+        all_qs = get_all_person_qs_status_cached() if db_ok else {}
+        
+        # Pre-fetch birthdays for all people in one go to avoid N database calls
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT name, birthday FROM participants WHERE unit_id = 1")
+        name_to_bday = {r['name'].strip(): r['birthday'] for r in c.fetchall()}
+        conn.close()
+
+        def get_rank_simple(name):
+            n = name.split(',')[0].strip()
+            bday = name_to_bday.get(n, "Unknown")
+            status = all_qs.get((n, bday), {'qs1_done': False, 'qs2_done': False, 'qs3_done': False})
+            if not status['qs1_done']: return "QS1 - Einsatzfähigkeit"
+            if not status['qs2_done']: return "QS2 - Truppmitglied"
+            if not status['qs3_done']: return "QS3 - Truppführende/r"
+            return "✅ Abgeschlossen"
+
         col1, col2 = st.columns([1, 2])
         with col1:
-            qs_options = sorted(df['qs_level'].unique())
-            sel_qs = st.selectbox("Ziel-QS-Stufe", options=qs_options)
-            
+            qs_ranks = ["QS1 - Einsatzfähigkeit", "QS2 - Truppmitglied", "QS3 - Truppführende/r", "✅ Abgeschlossen"]
+            sel_qs = st.selectbox("Aktuelle QS-Stufe", options=qs_ranks, index=1) # Default to QS2
         with col2:
             # Get all available modules for selection
             from src.data import natural_sort_key
@@ -828,7 +846,8 @@ if view_mode == "🎓 Lehrgangs-Check":
                 key=natural_sort_key
             )
             # Create labels: "ID (Title)"
-            mod_titles_full = df[['id', 'module_name']].drop_duplicates().set_index('id')['module_name'].to_dict()
+            m_col = 'title' if 'title' in df.columns else 'module_name'
+            mod_titles_full = df[['id', m_col]].drop_duplicates().set_index('id')[m_col].to_dict()
             mod_labels = [f"{m} - {mod_titles_full.get(m, 'Unknown')}" for m in available_modules]
             
             sel_mod_labels = st.multiselect(
@@ -842,12 +861,14 @@ if view_mode == "🎓 Lehrgangs-Check":
             selected_modules = [l.split(' - ')[0] for l in sel_mod_labels]
             
             # 2. Build Matrix
-            # df contains the latest status for each person/module
-            # Filter for selected modules
-            mod_subset = df[df['id'].isin(selected_modules)].copy()
-            
-            # Filter participants by selected QS
-            people_at_rank = df[df['qs_level'] == sel_qs]['person_name'].unique()
+            # Calculate rank for each unique person in the unit
+            all_person_names = df['person_name'].unique()
+            # Filter people who are currently in the selected rank
+            # Using a more efficient approach than row-by-row if possible, but let's stick to correctness first
+            people_at_rank = []
+            for p_name in all_person_names:
+                if get_rank_simple(p_name) == sel_qs:
+                    people_at_rank.append(p_name)
             
             if len(people_at_rank) == 0:
                 st.warning(f"Keine Personen in der QS-Stufe '{sel_qs}' gefunden.")
@@ -857,7 +878,8 @@ if view_mode == "🎓 Lehrgangs-Check":
                 # We should pivot and then fill missing columns
                 
                 # Check for module labels/titles to show them nicely
-                mod_titles = df[df['id'].isin(selected_modules)][['id', 'module_name']].drop_duplicates().set_index('id')['module_name'].to_dict()
+                m_col = 'title' if 'title' in df.columns else 'module_name'
+                mod_titles = df[df['id'].isin(selected_modules)][['id', m_col]].drop_duplicates().set_index('id')[m_col].to_dict()
                 
                 # Pivot
                 # Filter df to only these people and these modules
@@ -873,6 +895,8 @@ if view_mode == "🎓 Lehrgangs-Check":
                         values='status',
                         aggfunc='first'
                     )
+                    # Ensure all people are present, even if they have no entries for these modules
+                    matrix_df = matrix_df.reindex(people_at_rank)
                 
                 # Ensure all selected modules are present
                 for m in selected_modules:
@@ -888,9 +912,8 @@ if view_mode == "🎓 Lehrgangs-Check":
                 matrix_df['Offene Module'] = matrix_df.apply(count_missing, axis=1)
                 matrix_df = matrix_df.sort_values(by='Offene Module', ascending=False)
                 
-                # Map column names for display if possible (show ID and title)
+                # Map column names for display (show ONLY ID to keep table slim)
                 display_cols = ['Offene Module'] + selected_modules
-                col_rename = {m: f"{m}\n({mod_titles.get(m, 'Unknown')})" for m in selected_modules}
                 
                 # Styling
                 def highlight_status(val):
@@ -905,17 +928,11 @@ if view_mode == "🎓 Lehrgangs-Check":
 
                 st.write(f"Vorschlagsliste für **{len(people_at_rank)} Teilnehmer** in **{sel_qs}**:")
                 st.dataframe(
-                    matrix_df[display_cols].rename(columns=col_rename).style.applymap(highlight_status, subset=[col_rename.get(m, m) for m in selected_modules]),
+                    matrix_df[display_cols].style.applymap(highlight_status, subset=selected_modules),
                     use_container_width=True
                 )
         else:
-            st.info("Bitte gib oben Modul-IDs ein, um die Analyse zu starten.")
-            st.markdown("""
-            **Anleitung:**
-            - Gib einzelne Module an (z.B. `1.1`).
-            - Nutze Bereiche (z.B. `10.0-10.2`).
-            - Trenne mehrere Angaben durch Kommas.
-            """)
+            st.info("Bitte wähle oben die gewünschten Module aus, um die Analyse zu starten.")
     else:
         st.warning("Keine Daten geladen. Bitte im Dashboard zuerst Daten laden.")
 
