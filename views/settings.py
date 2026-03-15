@@ -2,12 +2,7 @@ import streamlit as st
 import time
 import json
 from datetime import datetime
-from src.database import (
-    get_qualifications, create_qualification, delete_qualification, update_qualification,
-    get_vehicles, create_vehicle, delete_vehicle, update_vehicle,
-    export_db_to_json, import_db_from_json, get_public_view_password, save_public_view_password,
-    get_feueron_config, save_feueron_config, update_user_password
-)
+import src.db_base as storage
 
 # Sichern der Seite: Nur für Admins
 if st.session_state.get('username', '').lower() != 'admin':
@@ -24,7 +19,7 @@ with tab_ausb:
     st.info("Hier kannst du alle Ausbildungen, deren Wertigkeit für den Fortschritt, Voraussetzungen und Gleichstellungen global für das System konfigurieren.")
 
     # Lade bestehende Ausbildungen für Dropdowns
-    quals = get_qualifications()
+    quals = storage.get_qualifications()
     qual_names = ["- Keine -"] + [q['name'] for q in quals]
 
     # Hilfs-Dicts für ID/Name Mapping
@@ -51,7 +46,7 @@ with tab_ausb:
                     prereq_id = name_to_id.get(q_prereq) if q_prereq != "- Keine -" else None
                     equiv_id = name_to_id.get(q_equiv) if q_equiv != "- Keine -" else None
                     
-                    ok, err = create_qualification(q_name.strip(), int(q_value), prereq_id, equiv_id)
+                    ok, err = storage.create_qualification(q_name.strip(), int(q_value), prereq_id, equiv_id)
                     if ok:
                         st.success(f"Ausbildung '{q_name}' erfolgreich angelegt!")
                         time.sleep(0.5)
@@ -107,7 +102,6 @@ with tab_ausb:
         # Detect if save is needed by comparing original and edited
         if not df_quals.equals(edited_df):
             if st.button("💾 Änderungen speichern", type="primary", use_container_width=True):
-                from src.database import update_qualification
                 errors = []
                 
                 # Find modified/added rows
@@ -126,11 +120,11 @@ with tab_ausb:
                     
                     if pd.notna(q_id):
                         # Existing row
-                        ok, err = update_qualification(int(q_id), q_name, int(q_value), req_id, eq_id)
+                        ok, err = storage.update_qualification(int(q_id), q_name, int(q_value), req_id, eq_id)
                         if not ok: errors.append(err)
                     else:
                         # New row added via datagrid
-                        ok, err = create_qualification(q_name, int(q_value), req_id, eq_id)
+                        ok, err = storage.create_qualification(q_name, int(q_value), req_id, eq_id)
                         if not ok: errors.append(err)
                         
                 # Find deleted rows
@@ -139,7 +133,7 @@ with tab_ausb:
                 deleted_ids = original_ids - current_ids
                 
                 for d_id in deleted_ids:
-                    ok, err = delete_qualification(int(d_id))
+                    ok, err = storage.delete_qualification(int(d_id))
                     if not ok: errors.append(err)
                     
                 if errors:
@@ -167,7 +161,7 @@ with tab_fahrz:
                 if not v_callsign.strip():
                     st.error("Bitte eine Funkrufkennung eingeben.")
                 else:
-                    ok, err = create_vehicle(v_callsign.strip(), int(v_seats))
+                    ok, err = storage.create_vehicle(v_callsign.strip(), int(v_seats))
                     if ok:
                         st.success(f"Fahrzeug '{v_callsign}' angelegt!")
                         time.sleep(0.5)
@@ -176,7 +170,7 @@ with tab_fahrz:
                         st.error(f"Fehler beim Anlegen: {err}")
 
     st.write("**Aktuell hinterlegte Fahrzeuge**")
-    vehicles = get_vehicles()
+    vehicles = storage.get_vehicles()
 
     if not vehicles:
         st.info("Noch keine Fahrzeuge konfiguriert.")
@@ -222,10 +216,10 @@ with tab_fahrz:
                     seats = row["seats"]
                     
                     if pd.notna(v_id):
-                        ok, err = update_vehicle(int(v_id), call_sign, int(seats))
+                        ok, err = storage.update_vehicle(int(v_id), call_sign, int(seats))
                         if not ok: errors.append(err)
                     else:
-                        ok, err = create_vehicle(call_sign, int(seats))
+                        ok, err = storage.create_vehicle(call_sign, int(seats))
                         if not ok: errors.append(err)
                         
                 # Find deleted rows
@@ -234,7 +228,7 @@ with tab_fahrz:
                 deleted_veh_ids = original_veh_ids - current_veh_ids
                 
                 for d_id in deleted_veh_ids:
-                    ok, err = delete_vehicle(int(d_id))
+                    ok, err = storage.delete_vehicle(int(d_id))
                     if not ok: errors.append(err)
                     
                 if errors:
@@ -249,10 +243,9 @@ with tab_email:
     st.subheader("E-Mail Versand konfigurieren")
     st.info("Richte hier den automatischen E-Mail-Versand (z.B. für Einsatzberichte) ein.")
     
-    from src.database import get_email_config, save_email_config
     
     unit_id = 1
-    config = get_email_config(unit_id) or {}
+    config = storage.get_email_config(unit_id) or {}
     
     with st.form("email_settings_form"):
         st.write("### SMTP Server Einstellungen")
@@ -276,7 +269,7 @@ with tab_email:
         
         submitted_email = st.form_submit_button("E-Mail Einstellungen speichern", type="primary")
         if submitted_email:
-            ok, err = save_email_config(unit_id, smtp_server, smtp_port, smtp_user, smtp_password, sender_email, recipient_emails, delay_minutes)
+            ok, err = storage.save_email_config(unit_id, smtp_server, smtp_port, smtp_user, smtp_password, sender_email, recipient_emails, delay_minutes)
             if ok:
                 st.success("E-Mail Einstellungen erfolgreich gespeichert!")
                 time.sleep(1)
@@ -301,7 +294,6 @@ with tab_email:
 
 # --- TAB BENUTZERVERWALTUNG ---
 with tab_benut:
-    from src.database import get_all_users, update_user_admin_status, create_user_with_unit
 
     st.subheader("Benutzerverwaltung (Admin-Rechte)")
     st.info("Lege fest, welche verknüpften Accounts Zugriff auf diese Einstellungen haben. Das System-Konto 'admin' lässt sich nicht verändern.")
@@ -320,20 +312,19 @@ with tab_benut:
                     st.error("Bitte Benutzername und Passwort eingeben.")
                 else:
                     # In this system, user creates are implicitly tied to unit_id 1 unless a unit dropdown is meant to be used
-                    ok, err = create_user_with_unit(u_name.strip(), u_pass, 1)
+                    ok, err = storage.create_user_with_unit(u_name.strip(), u_pass, 1)
                     if ok:
                         st.success(f"Benutzer '{u_name}' erfolgreich angelegt!")
                         import time
                         time.sleep(1)
                         st.rerun()
-    users_list = get_all_users()
+    users_list = storage.get_all_users()
     if not users_list:
         st.warning("Keine Benutzer gefunden (außer dem System-Admin).")
     else:
         st.write("---")
         st.write("**Aktuelle Benutzer**")
         
-        from src.database import delete_user, update_user_admin_status
         
         for u in users_list:
             is_admin_user = (u['username'].lower() == 'admin')
@@ -353,7 +344,7 @@ with tab_benut:
                     )
                     
                     if new_admin_status != current_admin_status:
-                        ok, err = update_user_admin_status(u['id'], new_admin_status)
+                        ok, err = storage.update_user_admin_status(u['id'], new_admin_status)
                         if ok:
                             st.success("Berechtigungen aktualisiert!")
                             time.sleep(0.5)
@@ -365,7 +356,7 @@ with tab_benut:
                     # Delete Button (not for system admin)
                     if not is_admin_user:
                         if st.button("🗑️ Benutzer löschen", key=f"del_u_{u['id']}", type="secondary", use_container_width=True):
-                            ok, err = delete_user(u['id'])
+                            ok, err = storage.delete_user(u['id'])
                             if ok:
                                 st.success("Benutzer gelöscht.")
                                 time.sleep(0.5)
@@ -382,7 +373,7 @@ with tab_benut:
                     pw_submit = st.form_submit_button("Passwort aktualisieren", use_container_width=True)
                     if pw_submit:
                         if new_pwd:
-                            ok, err = update_user_password(u['id'], new_pwd)
+                            ok, err = storage.update_user_password(u['id'], new_pwd)
                             if ok:
                                 st.success(f"Passwort für {u['username']} erfolgreich geändert!")
                             else:
@@ -392,12 +383,11 @@ with tab_benut:
 
 # --- TAB AUTO-DOWNLOAD & SYNC ---
 with tab_sync:
-    from src.database import get_feueron_config, save_feueron_config
     st.subheader("🔄 FeuerOn Auto-Download")
     st.caption("Täglich automatisch auf feueron.de einloggen, PDF herunterladen und importieren.")
     
     sel_uid = 1
-    cfg = get_feueron_config(sel_uid)
+    cfg = storage.get_feueron_config(sel_uid)
     
     st.divider()
     st.subheader("🔑 FeuerOn Zugangsdaten")
@@ -446,7 +436,7 @@ with tab_sync:
         
         save_btn = st.form_submit_button("💾 Synchronisation speichern", use_container_width=True)
         if save_btn:
-            ok, err = save_feueron_config(
+            ok, err = storage.save_feueron_config(
                 sel_uid, f_org, f_org_id, f_user, f_pass,
                 int(f_hour), int(f_minute), f_enabled
             )
@@ -463,7 +453,7 @@ with tab_sync:
     st.divider()
     st.subheader("📊 Sync-Status")
     
-    cfg_live = get_feueron_config(sel_uid)
+    cfg_live = storage.get_feueron_config(sel_uid)
     if cfg_live:
         s = cfg_live.get('last_sync_status')
         s_msg = cfg_live.get('last_sync_message', '')
@@ -516,7 +506,7 @@ with tab_sich:
     st.write("### 🔑 Teilnehmer-Abfrage (Public View)")
     st.write("Dieser Code ermöglicht es Teilnehmern, ihren Ausbildungsstand abzufragen, ohne ein volles Benutzerkonto zu besitzen.")
     
-    current_pw = get_public_view_password(1) or "feuerprofi"
+    current_pw = storage.get_public_view_password(1) or "feuerprofi"
     
     with st.form("public_view_pw_form"):
         new_public_pw = st.text_input("Zugriffscode (z.B. Funkrufname)", value=current_pw, help="Wird für die Anmeldung im Teilnehmer-Bereich benötigt.")
@@ -526,7 +516,7 @@ with tab_sich:
             if not new_public_pw.strip():
                 st.error("Der Zugriffscode darf nicht leer sein.")
             else:
-                ok, err = save_public_view_password(1, new_public_pw.strip())
+                ok, err = storage.save_public_view_password(1, new_public_pw.strip())
                 if ok:
                     st.success("Zugriffscode erfolgreich aktualisiert!")
                     time.sleep(1)
@@ -537,7 +527,6 @@ with tab_sich:
 # --- TAB WARTUNG ---
 with tab_wart:
     # --- DATEN-BEREINIGUNG ---
-    from src.database import delete_all_unknown_persons
 
     st.subheader("Daten-Bereinigung")
     st.info("Hier kannst du aufräumen. Beispielsweise fehlerhafte 'Unknown'-Personen entfernen, die beim Import oder PDF-Upload doppelt angelegt wurden.")
@@ -545,7 +534,7 @@ with tab_wart:
     col_clean1, _ = st.columns(2)
     with col_clean1:
         if st.button("🗑️ Alle 'Unknown'-Personen löschen", type="primary"):
-            ok, err, count = delete_all_unknown_persons(unit_id=1)
+            ok, err, count = storage.delete_all_unknown_persons(unit_id=1)
             if ok:
                 st.success(f"Erfolgreich {count} 'Unknown'-Person(en) gelöscht!")
                 time.sleep(1.5)
@@ -557,48 +546,54 @@ with tab_wart:
 
 # --- TAB UPDATE ---
 with tab_update:
-    import src.updater as updater
+    import src.sync_updater as sync_upd
     st.subheader("🚀 System-Update")
     st.caption("Prüfe auf neue Versionen direkt von GitHub und aktualisiere das System.")
     
+    # Auto-Update Info
+    upd_config = storage.get_auto_update_config()
+    if upd_config:
+        st.info("🕒 **Automatisches Update**")
+        days = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+        day_str = days[upd_config['update_day']]
+        st.write(f"Nächstes wöchentliches Update: **Jeden {day_str} um {upd_config['update_hour']:02d}:{upd_config['update_minute']:02d} Uhr**")
+        
+        last_check = upd_config.get('last_check_at', 'Nie')
+        st.write(f"Letzte Prüfung: `{last_check}`")
+        if upd_config.get('update_available'):
+            st.warning("⚠️ Ein Update ist verfügbar und wird zum nächsten Termin automatisch installiert.")
+        else:
+            st.success("✅ System ist aktuell.")
+
+    st.divider()
+    
     col1, col2 = st.columns(2)
     with col1:
-        st.info(f"**Aktuelle Version (lokal):** `{updater.get_local_commit()}`")
-        st.write(f"Zweig: `{updater.get_current_branch()}`")
+        st.info(f"**Aktuelle Version (lokal):** `{sync_upd.get_local_commit()}`")
+        st.write(f"Zweig: `{sync_upd.get_current_branch()}`")
 
     with col2:
         if st.button("🔍 Auf Updates prüfen", use_container_width=True):
-            remote = updater.get_remote_commit()
-            if remote == "Unknown":
-                st.error("Konnte keine Verbindung zu GitHub herstellen.")
-            else:
-                st.success(f"GitHub Version: `{remote}`")
-                if updater.is_update_available():
-                    st.warning("⚠️ Eine neue Version ist verfügbar!")
+            with st.spinner("Prüfe auf Updates..."):
+                available = sync_upd.check_for_updates()
+                remote = sync_upd.get_remote_commit()
+                if remote == "Unknown":
+                    st.error("Konnte keine Verbindung zu GitHub herstellen.")
+                elif available:
+                    st.warning(f"⚠️ Eine neue Version ist verfügbar! (`{remote}`)")
+                    st.rerun()
                 else:
-                    st.info("Das System ist auf dem neuesten Stand.")
+                    st.success("Das System ist auf dem neuesten Stand.")
 
     st.divider()
     
     if st.button("🚀 Jetzt Update starten", type="primary", use_container_width=True):
-        with st.status("⏳ Update wird ausgeführt...") as status:
-            st.write("Lade Code von GitHub herunter...")
-            ok_pull, msg_pull = updater.run_git_pull()
-            if ok_pull:
-                st.write("Code aktualisiert. Installiere Abhängigkeiten...")
-                ok_pip, msg_pip = updater.update_dependencies()
-                if ok_pip:
-                    status.update(label="✅ Update erfolgreich abgeschlossen!", state="complete")
-                    st.success("Das System wurde erfolgreich aktualisiert. Die App wird automatisch neu geladen.")
-                    import time
-                    time.sleep(2)
-                    st.rerun()
-                else:
-                    status.update(label="❌ Fehler bei der Installation", state="error")
-                    st.error(f"Fehler bei pip install: {msg_pip}")
-            else:
-                status.update(label="❌ Fehler beim Herunterladen", state="error")
-                st.error(f"Fehler bei git pull: {msg_pull}")
+        st.toast("Update wird gestartet... Der Server startet gleich neu.")
+        import time
+        time.sleep(2)
+        ok, msg = sync_upd.perform_auto_update()
+        if not ok:
+            st.error(f"Fehler beim Update: {msg}")
 
 # --- TAB BACKUP ---
 with tab_backup:
@@ -613,7 +608,7 @@ with tab_backup:
         include_hist = st.checkbox("Historien-Daten (Modul-Historie) in Backup einschließen", value=False, help="Wenn deaktiviert, wird die große Historien-Tabelle ausgelassen, was die Backup-Datei verkleinert.")
         try:
             # We delay loading to not lock the UI
-            compressed_data = export_db_to_json(include_history=include_hist)
+            compressed_data = storage.export_db_to_json(include_history=include_hist)
             now_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             st.download_button(
                 label="📥 Backup herunterladen (.json.gz)",
@@ -632,7 +627,7 @@ with tab_backup:
         if uploaded_file is not None:
             if st.button("🚨 Datenbank jetzt überschreiben", type="primary", use_container_width=True):
                 compressed_content = uploaded_file.getvalue()
-                ok, err = import_db_from_json(compressed_content)
+                ok, err = storage.import_db_from_json(compressed_content)
                 if ok:
                     st.success("Datenbank erfolgreich wiederhergestellt!")
                     time.sleep(1)

@@ -33,7 +33,7 @@ if not logger.handlers:
     logger.addHandler(handler)
     logger.info("Application started")
 
-from src.database import (
+from src.db_base import (
     init_db, save_upload_data, get_person_history, verify_user, init_admin_user, 
     delete_person, delete_all_persons, get_units, create_unit, delete_unit, 
     get_all_users, create_user_with_unit, delete_user, get_all_participants_admin, 
@@ -160,7 +160,7 @@ if st.query_params.get("view") == "public":
         st.stop()
 
     # 3. Wenn autorisiert -> Person suchen und Read-Only Render
-    from src.database import get_person_data_public
+    from src.db_base import get_person_data_public
     print(f"DEBUG APP.PY: Searching for name='{search_name}', bday='{search_bday}'")
     person_data = get_person_data_public(search_name, search_bday)
     
@@ -281,7 +281,7 @@ def start_scheduler():
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         from src.feueron_downloader import run_download
-        from src.database import get_all_feueron_configs
+        from src.db_base import get_all_feueron_configs
         
         scheduler = BackgroundScheduler()
         
@@ -374,7 +374,7 @@ if 'authenticated' not in st.session_state:
         st.session_state.username = cookie_user
         
         # Hol die definierte Einheit für den Auto-Login aus der DB
-        from src.database import get_connection
+        from src.db_base import get_connection
         conn = get_connection()
         cur = conn.cursor()
         cur.execute("SELECT u.unit_id, un.name FROM users u LEFT JOIN units un ON u.unit_id = un.id WHERE u.username=?", (cookie_user,))
@@ -393,7 +393,7 @@ if 'authenticated' not in st.session_state:
 def login():
     st.title("🔐 Login")
     
-    from src.database import get_units
+    from src.db_base import get_units
     units = get_units()
     unit_options = {u['id']: u['name'] for u in units}
     
@@ -504,7 +504,7 @@ with st.sidebar:
         with st.expander("📂 Daten-Upload", expanded=(st.session_state.df is None)):
             
             # Neuer FeuerOn API Auto-Download Button im Haupt-Upload-Menü
-            from src.database import get_feueron_config
+            from src.db_base import get_feueron_config
             cfg = get_feueron_config(st.session_state.unit_id)
             if cfg and cfg.get('feueron_username'):
                 st.markdown("🔄 **Automatisch via FeuerOn API:**")
@@ -512,7 +512,7 @@ with st.sidebar:
                     with st.spinner("⏳ Verbinde mit FeuerOn und lade Trainingsdaten herunter... (Bitte warten)"):
                         from src.feueron_downloader import run_download as _run_dl
                         import time
-                        from src.database import get_latest_upload_data_cached
+                        from src.db_base import get_latest_upload_data_cached
                         from src.data import process_training_data
                         
                         ok, msg = _run_dl(st.session_state.unit_id)
@@ -552,7 +552,7 @@ with st.sidebar:
                             with st.status("📌 Speichern...", expanded=True) as status:
                                 prog_db = st.progress(0, text="Upload in Datenbank... 0%")
                                 save_upload_data(uploaded_file.name, raw,
-                                                 progress_callback=lambda p: prog_db.progress(p, text=f"Upload in Datenbank... {int(p*100)}%"), unit_id=st.session_state.unit_id)
+                                                 progress_callback=lambda p: prog_storage.progress(p, text=f"Upload in Datenbank... {int(p*100)}%"), unit_id=st.session_state.unit_id)
                                 status.update(label="✅ Gespeichert", state="complete")
                         st.cache_data.clear()
                         st.rerun()  # Show data IMMEDIATELY
@@ -627,7 +627,7 @@ with st.sidebar:
 def _get_birthday_for_name(name: str) -> str:
     """Schlägt das Geburtsdatum einer Person in SQLite nach, um den DB-Key zu ermitteln."""
     try:
-        from src.database import get_connection
+        from src.db_base import get_connection
         conn = get_connection()
         c = conn.cursor()
         c.execute("SELECT birthday FROM participants WHERE name = ? LIMIT 1", (name,))
@@ -670,7 +670,7 @@ if view_mode == "⚙️ Admin-Bereich" and is_admin:
                 st.session_state.last_loaded_file = None # Clear this to force a full fresh reload
                 
                 # Immediately fetch the data for the new unit
-                from src.database import get_latest_upload_data_cached
+                from src.db_base import get_latest_upload_data_cached
                 from src.data import process_training_data
                 if db_ok:
                     latest = get_latest_upload_data_cached(unit_id=uid)
@@ -800,7 +800,7 @@ if view_mode == "⚙️ Admin-Bereich" and is_admin:
 
     with tab_logins:
         st.subheader("Letzte Logins (Global)")
-        from src.database import get_login_history
+        from src.db_base import get_login_history
         history = get_login_history(limit=50)
         if history:
             df_hist = pd.DataFrame(history)
@@ -949,7 +949,7 @@ if view_mode == "⚙️ Admin-Bereich" and is_admin:
                             if ok:
                                 st.success(f"{msg}")
                                 # Verhalte dich exakt so wie beim manuellen PDF Upload: Lade die neu gespeicherten DB-Daten und update die Session
-                                from src.database import get_latest_upload_data_cached
+                                from src.db_base import get_latest_upload_data_cached
                                 from src.data import process_training_data
                                 st.cache_data.clear()
                                 latest = get_latest_upload_data_cached(unit_id=sel_uid)

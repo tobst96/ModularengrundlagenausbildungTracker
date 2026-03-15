@@ -151,12 +151,11 @@ if seq_server_url:
 
 logger = logging.getLogger(__name__)
 
-from src.database import verify_user, log_login, init_db, delete_expired_participants, export_db_to_json, is_default_password, change_password, init_admin_user
+import src.db_base as storage
 try:
-    from src.database import get_connection
-    init_db()
+    storage.init_db()
     admin_pass = os.environ.get("ADMIN_PASSWORD", "admin")
-    init_admin_user("admin", admin_pass)
+    storage.init_admin_user("admin", admin_pass)
     db_ok = True
     logger.info("Database and Admin user initialized successfully.")
 except Exception as e:
@@ -168,7 +167,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # Setup Background Scheduler for midnight deletions
 def daily_db_backup():
     try:
-        compressed_data = export_db_to_json(include_history=True)
+        compressed_data = storage.export_db_to_json(include_history=True)
         now_str = datetime.now().strftime("%Y-%m-%d")
         filepath = os.path.join("data", f"backup_{now_str}.json.gz")
         with open(filepath, "wb") as f:
@@ -184,17 +183,16 @@ def daily_db_backup():
     except Exception as e:
         logger.error(f"Daily backup failed: {e}")
 
-from src.database import get_unsent_incident_reports, mark_reports_as_sent, get_email_config
 from src.mailer import send_incident_report_summary
 
 def check_unsent_reports():
     try:
         # Wir gehen hier von unit_id = 1 aus, in einer Multi-Tenant Umgebung müsste man iterieren.
-        config = get_email_config(1)
+        config = storage.get_email_config(1)
         if not config:
             return  # Email nicht konfiguriert
             
-        reports = get_unsent_incident_reports()
+        reports = storage.get_unsent_incident_reports()
         if not reports:
             return
             
@@ -213,7 +211,7 @@ def check_unsent_reports():
             if ok:
                 # Markiere die versendeten Berichte in der Datenbank
                 report_ids = [r['id'] for r in reports]
-                mark_ok, mark_err = mark_reports_as_sent(report_ids)
+                mark_ok, mark_err = storage.mark_reports_as_sent(report_ids)
                 if mark_ok:
                     logger.info("Reports successfully emailed and marked as sent.")
                 else:
@@ -227,10 +225,29 @@ def check_unsent_reports():
 if "scheduler" not in st.session_state:
     scheduler = BackgroundScheduler()
     # Runs everyday at midnight (00:00)
-    scheduler.add_job(delete_expired_participants, 'cron', hour=0, minute=0, args=[360])
+    scheduler.add_job(storage.delete_expired_participants, 'cron', hour=0, minute=0, args=[360])
     scheduler.add_job(daily_db_backup, 'cron', hour=0, minute=0)
     # Check for incident reports every 5 minutes
     scheduler.add_job(check_unsent_reports, 'interval', minutes=5)
+    
+    # --- UPDATE JOBS ---
+    import src.sync_updater as sync_upd
+    # Daily update check at 02:00
+    scheduler.add_job(sync_upd.check_for_updates, 'cron', hour=2, minute=0)
+    
+    # Weekly auto-update
+    upd_config = storage.get_auto_update_config()
+    if upd_config:
+        # APScheduler uses 0-6 for mon-sun or strings like 'mon', 'tue'... 
+        # Our DB stores 0-6.
+        scheduler.add_job(
+            sync_upd.perform_auto_update, 
+            'cron', 
+            day_of_week=str(upd_config['update_day']), 
+            hour=upd_config['update_hour'], 
+            minute=upd_config['update_minute'],
+            id='weekly_auto_update'
+        )
     
     scheduler.start()
     logger.info("BackgroundScheduler started for daily jobs and auto-send.")
@@ -257,12 +274,11 @@ cookie_user = _cookies.get("username", "")
 cookie_auth = _cookies.get("auth", "")
 
 # --- TOKEN AUTHENTICATION BYPASS ---
-from src.database import get_vehicle_by_token
 token_param = st.query_params.get("token", "")
 
 # Initialer Load durch Token URL
 if token_param:
-    vehicle = get_vehicle_by_token(token_param)
+    vehicle = storage.get_vehicle_by_token(token_param)
     if vehicle:
         st.session_state.authenticated = True
         st.session_state.username = f"Einsatz Modus: {vehicle['call_sign']}"
@@ -280,8 +296,7 @@ if not st.session_state.authenticated:
         st.session_state.is_token_auth = False
         
         # Hol die definierte Einheit für den Auto-Login aus der DB
-        from src.database import get_connection
-        conn = get_connection()
+        conn = storage.get_connection()
         cur = conn.cursor()
         cur.execute("SELECT u.unit_id, u.is_admin, un.name FROM users u LEFT JOIN units un ON u.unit_id = un.id WHERE u.username=?", (cookie_user,))
         res = cur.fetchone()
@@ -338,10 +353,10 @@ def login():
             if not username or not password:
                 st.error("Bitte Benutzername und Passwort eingeben.")
             else:
-                success, db_unit_id, db_unit_name, is_admin_flag = verify_user(username, password)
+                success, db_unit_id, db_unit_name, is_admin_flag = storage.verify_user(username, password)
                 if success:
                     client_ip = st.context.headers.get("X-Forwarded-For", "Unknown IP") if hasattr(st, 'context') else "Unknown IP"
-                    log_login(username, client_ip, "Erfolgreich")
+                    storage.log_login(username, client_ip, "Erfolgreich")
                     import logging
                     lo = logging.getLogger("TrainingTracker")
                     lo.info(f"User {username} logged in successfully")
@@ -362,7 +377,7 @@ def login():
                     st.rerun()
                 else:
                     client_ip = st.context.headers.get("X-Forwarded-For", "Unknown IP") if hasattr(st, 'context') else "Unknown IP"
-                    log_login(username, client_ip, "Fehlgeschlagen")
+                    storage.log_login(username, client_ip, "Fehlgeschlagen")
                     import logging
                     lo = logging.getLogger("TrainingTracker")
                     lo.warning(f"Failed login attempt for user {username}")
@@ -375,7 +390,7 @@ if not st.session_state.authenticated:
 # --- FORCED PASSWORD CHANGE (if default password is still set) ---
 if st.session_state.authenticated and not st.session_state.get('is_token_auth', False):
     current_user = st.session_state.get('username', '')
-    if current_user and is_default_password(current_user):
+    if current_user and storage.is_default_password(current_user):
         st.warning("🔒 **Sicherheitshinweis:** Du verwendest noch das Standard-Passwort. Bitte lege jetzt ein neues Passwort fest.")
         with st.form("force_password_change"):
             new_pw = st.text_input("Neues Passwort", type="password")
@@ -389,7 +404,7 @@ if st.session_state.authenticated and not st.session_state.get('is_token_auth', 
                 elif new_pw != new_pw_confirm:
                     st.error("Die Passwörter stimmen nicht überein.")
                 else:
-                    ok, err = change_password(current_user, new_pw)
+                    ok, err = storage.change_password(current_user, new_pw)
                     if ok:
                         st.success("✅ Passwort erfolgreich geändert!")
                         import time
@@ -436,6 +451,17 @@ with st.sidebar:
             _cookies["auth"] = ""
             _cookies.save()
             st.rerun()
+
+    # --- Sidebar Update Notification ---
+    update_cfg = storage.get_auto_update_config()
+    if update_cfg and update_cfg.get('update_available'):
+        st.divider()
+        st.warning("🚀 **Update verfügbar!**")
+        if st.button("🚀 Schnell-Update", key="sidebar_update_btn", use_container_width=True, type="primary"):
+            st.toast("Update wird gestartet... Der Server startet gleich neu.")
+            import time
+            time.sleep(1)
+            sync_upd.perform_auto_update()
 
 pg.run()
 

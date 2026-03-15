@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from src.database import get_connection
+from src.db_base import get_connection
 import logging
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ try:
             st.progress(ready / qs_data['total'] if qs_data['total'] > 0 else 0, text=f"{ready} von {qs_data['total']} einsatzbereit")
             st.caption("Personen mit abgeschlossener QS1 gelten als einsatzbereit.")
             
-            from src.database import get_promotion_config
+            from src.db_base import get_promotion_config
             p_cfg = get_promotion_config(1)
             
             c.execute("""

@@ -1,6 +1,6 @@
 import streamlit as st
 from datetime import datetime
-from src.database import get_vehicles, get_connection
+from src.db_base import get_vehicles, get_connection
 
 def get_all_participants():
     """Hilfsfunktion: Lädt alle Personen (nur Name) für die Dropdowns"""
@@ -92,7 +92,7 @@ st.subheader("Einsatzverlauf")
 lage = st.text_area("Lage bei Eintreffen", height=200, placeholder="Kurze Beschreibung der Situation beim Ankommen an der Einsatzstelle...", key="eb_lage")
 taetigkeiten = st.text_area("Tätigkeiten", height=250, placeholder="Ausgeführte Maßnahmen, eingesetztes Gerät, vorgehende Trupps...", key="eb_taetigkeiten")
 
-from src.database import create_incident_report
+from src.db_base import create_incident_report
 import json
 import time
 

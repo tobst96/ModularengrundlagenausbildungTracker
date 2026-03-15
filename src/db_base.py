@@ -25,6 +25,44 @@ def get_connection() -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous = NORMAL;")
     return conn
 
+# ---- Auto Update Config ----
+
+def get_auto_update_config() -> Optional[Dict[str, Any]]:
+    with _lock:
+        conn = get_connection()
+        try:
+            c = conn.cursor()
+            c.execute("SELECT * FROM auto_update_config WHERE id = 1")
+            row = c.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+def save_auto_update_config(data: Dict[str, Any]) -> bool:
+    with _lock:
+        conn = get_connection()
+        try:
+            fields = []
+            values = []
+            for k, v in data.items():
+                if k != 'id':
+                    fields.append(f"{k}=?")
+                    values.append(v)
+            
+            if not fields:
+                return True
+                
+            query = f"UPDATE auto_update_config SET {', '.join(fields)} WHERE id = 1"
+            conn.execute(query, values)
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error saving auto_update_config: {e}")
+            return False
+        finally:
+            conn.close()
+
+
 def init_db():
     with _lock:
         conn = get_connection()
@@ -203,6 +241,17 @@ def init_db():
                     qs3_threshold INTEGER DEFAULT 100,
                     FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
                 );
+                
+                CREATE TABLE IF NOT EXISTS auto_update_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1), -- Nur ein Eintrag erlaubt
+                    update_day INTEGER NOT NULL,
+                    update_hour INTEGER NOT NULL,
+                    update_minute INTEGER NOT NULL,
+                    last_check_at TEXT,
+                    update_available INTEGER DEFAULT 0,
+                    remote_commit TEXT,
+                    auto_update_enabled INTEGER DEFAULT 1
+                );
             """)
 
             # --- Performance Indizes ---
@@ -295,6 +344,22 @@ def init_db():
                         FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
                     )
                 """)
+            except Exception: pass
+
+            # Auto Update Config Initialization
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM auto_update_config WHERE id = 1")
+                if not cursor.fetchone():
+                    import random
+                    d = random.randint(0, 6)
+                    h = random.randint(0, 5) # Early morning
+                    m = random.randint(0, 59)
+                    conn.execute("""
+                        INSERT INTO auto_update_config (id, update_day, update_hour, update_minute)
+                        VALUES (1, ?, ?, ?)
+                    """, (d, h, m))
+                conn.commit()
             except Exception: pass
 
             conn.commit()

@@ -3,7 +3,7 @@ import pandas as pd
 import json
 import os
 from typing import List, Dict, Any
-from src.database import get_participants_with_qualifications, get_qualifications
+from src.db_base import get_participants_with_qualifications, get_qualifications
 from io import BytesIO
 
 SAVE_FILE = os.path.join("data", "last_assignment.json")

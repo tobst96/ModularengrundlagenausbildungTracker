@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import json
-from src.database import get_connection
+from src.db_base import get_connection
 
 st.title("📜 Einsatz-Historie")
 st.info("Übersicht aller abgeschlossenen Einsatzberichte.")

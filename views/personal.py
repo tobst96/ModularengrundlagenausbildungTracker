@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 import time
-from src.database import (
+from src.db_base import (
     get_participants_with_qualifications,
     get_qualifications,
     assign_qualification,
@@ -68,7 +68,7 @@ if st.session_state.get('df') is not None:
             if key not in participants_dict:
                 # Add a dummy participant record for display
                 # We save it to DB so they have an ID for qualifications
-                from src.database import get_connection
+                from src.db_base import get_connection
                 conn = get_connection()
                 try:
                     c = conn.cursor()
@@ -159,7 +159,7 @@ else:
                         # Existing keys to skip DB checks if possible
                         existing_keys = {(p['name'], p['birthday']) for p in participants}
                         
-                        from src.database import get_connection
+                        from src.db_base import get_connection
                         
                         for key, hours in hour_mapping.items():
                             name, bday = key

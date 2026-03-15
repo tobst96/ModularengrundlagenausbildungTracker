@@ -28,7 +28,7 @@ ALL_QS_STUFEN = ["1", "2", "3", "7", "5", "4"]
 
 def _get_db_config(unit_id: int) -> Optional[dict]:
     unit_id = 1
-    from src.database import get_connection
+    from src.db_base import get_connection
     conn = get_connection()
     try:
         c = conn.cursor()
@@ -41,7 +41,7 @@ def _get_db_config(unit_id: int) -> Optional[dict]:
 
 def _update_sync_status(unit_id: int, status: str, message: str = ""):
     unit_id = 1
-    from src.database import get_connection
+    from src.db_base import get_connection
     conn = get_connection()
     try:
         now = datetime.now().isoformat()
@@ -333,10 +333,10 @@ def run_download(unit_id: int = 1) -> tuple:
             _update_sync_status(unit_id, "running", f"PDF wird importiert...")
 
             from src.parser import extract_data_from_pdf
-            from src.database import save_upload_data
+            from src.db_base import save_upload_data
 
             # PDF in Datenbank cachen (DB-basiert, Docker-sicher)
-            from src.database import save_pdf_cache
+            from src.db_base import save_pdf_cache
             save_pdf_cache(unit_id, pdf_bytes, pdf_filename)
             raw_data = extract_data_from_pdf(io.BytesIO(pdf_bytes))
             
@@ -346,7 +346,7 @@ def run_download(unit_id: int = 1) -> tuple:
                 _update_sync_status(unit_id, "failed", msg)
                 return False, msg
 
-            from src.database import save_upload_data
+            from src.db_base import save_upload_data
             save_upload_data(
                 filename=pdf_filename,
                 processed_data=raw_data,
@@ -358,7 +358,7 @@ def run_download(unit_id: int = 1) -> tuple:
             _update_sync_status(unit_id, "running", f"Generiere Einzelzertifikate...")
             try:
                 from src.parser import extract_all_person_pdfs
-                from src.database import save_person_pdf_cache, clear_person_pdf_cache
+                from src.db_base import save_person_pdf_cache, clear_person_pdf_cache
                 
                 # Alte Caches dieser Unit leeren
                 clear_person_pdf_cache(unit_id)

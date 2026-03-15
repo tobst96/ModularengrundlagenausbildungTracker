@@ -19,7 +19,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 logger = logging.getLogger(__name__)
 
-from src.database import (
+from src.db_base import (
     init_db, save_upload_data, get_person_history, verify_user, init_admin_user, 
     delete_person, delete_all_persons, get_units, create_unit, delete_unit, 
     get_all_users, create_user_with_unit, delete_user, get_all_participants_admin, 
@@ -86,7 +86,7 @@ if st.query_params.get("view") == "public":
         
     # 2. Wenn Parameter vorliegen -> Passwort-Abfrage
     # Public View password is stored in the database (configurable via Settings)
-    from src.database import get_public_view_password
+    from src.db_base import get_public_view_password
     _public_pw = get_public_view_password(1) or "feuerprofi"
     if not st.session_state.get(f"public_auth_{search_name}_{search_bday}"):
         with st.form("public_auth_form"):
@@ -103,7 +103,7 @@ if st.query_params.get("view") == "public":
         st.stop()
 
     # 3. Wenn autorisiert -> Person suchen und Read-Only Render
-    from src.database import get_person_data_public
+    from src.db_base import get_person_data_public
     person_data = get_person_data_public(search_name, search_bday)
     
     if not person_data or not person_data.get('person'):
@@ -219,7 +219,7 @@ if st.query_params.get("view") == "public":
     try:
         _uid_for_pdf = p_info.get('unit_id') or 1
         target_name = p_info['name']
-        from src.database import get_person_pdf_cache
+        from src.db_base import get_person_pdf_cache
         cached_pdf_bytes = get_person_pdf_cache(int(_uid_for_pdf), target_name)
         
         if cached_pdf_bytes:
@@ -275,7 +275,7 @@ def start_scheduler():
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         from src.feueron_downloader import run_download
-        from src.database import get_all_feueron_configs
+        from src.db_base import get_all_feueron_configs
         
         scheduler = BackgroundScheduler()
         
@@ -297,7 +297,7 @@ def start_scheduler():
                     logger.info(f"Scheduler-Job registriert: Einheit {cfg['unit_id']} um {cfg.get('sync_hour',3):02d}:{cfg.get('sync_minute',0):02d} Uhr")
                     
             # Registriere ebenfalls den PDF-Cache Cleanup Job (täglich 04:00 Uhr)
-            from src.database import cleanup_old_pdfs
+            from src.db_base import cleanup_old_pdfs
             scheduler.add_job(
                 cleanup_old_pdfs,
                 'cron',
@@ -397,7 +397,7 @@ with st.sidebar:
         with st.expander("📂 Daten-Upload", expanded=(st.session_state.df is None)):
             
             # Neuer FeuerOn API Auto-Download Button im Haupt-Upload-Menü
-            from src.database import get_feueron_config
+            from src.db_base import get_feueron_config
             cfg = get_feueron_config(1)
             if cfg and cfg.get('feueron_username'):
                 st.markdown("🔄 **Automatisch via FeuerOn API:**")
@@ -405,7 +405,7 @@ with st.sidebar:
                     with st.spinner("⏳ Verbinde mit FeuerOn und lade Trainingsdaten herunter... (Bitte warten)"):
                         from src.feueron_downloader import run_download as _run_dl
                         import time
-                        from src.database import get_latest_upload_data_cached
+                        from src.db_base import get_latest_upload_data_cached
                         from src.data import process_training_data
                         
                         logger.debug("Starting FeuerON API download triggered by UI button.")
@@ -453,22 +453,22 @@ with st.sidebar:
                                 save_upload_data(
                                     filename=uploaded_file.name, 
                                     processed_data=raw,
-                                    progress_callback=lambda p: prog_db.progress(p, text=f"Upload in Datenbank... {int(p*100)}%"), 
+                                    progress_callback=lambda p: prog_storage.progress(p, text=f"Upload in Datenbank... {int(p*100)}%"), 
                                     unit_id=1
                                 )
                                 
                                 # --- NEU: Bulk-Isolierung der Einzel-PDFs für den schnellen Abruf ---
                                 try:
                                     logger.info("Starte Bulk-Zerschneiden der PDF für Zertifikate (Manueller Upload)...")
-                                    prog_db.progress(0.0, text="Generiere Einzelzertifikate... 0%")
+                                    prog_storage.progress(0.0, text="Generiere Einzelzertifikate... 0%")
                                     from src.parser import extract_all_person_pdfs
-                                    from src.database import save_person_pdf_cache, clear_person_pdf_cache
+                                    from src.db_base import save_person_pdf_cache, clear_person_pdf_cache
                                     import io
                                     
                                     clear_person_pdf_cache(1)
                                     person_pdfs = extract_all_person_pdfs(
                                         io.BytesIO(uploaded_bytes), 
-                                        progress_callback=lambda p: prog_db.progress(p, text=f"Generiere Einzelzertifikate... {int(p*100)}%")
+                                        progress_callback=lambda p: prog_storage.progress(p, text=f"Generiere Einzelzertifikate... {int(p*100)}%")
                                     )
                                     for p_name, p_bytes in person_pdfs.items():
                                         save_person_pdf_cache(1, p_name, p_bytes)
@@ -564,7 +564,7 @@ with st.sidebar:
 def _get_birthday_for_name(name: str) -> str:
     """Schlägt das Geburtsdatum einer Person in SQLite nach, um den DB-Key zu ermitteln."""
     try:
-        from src.database import get_connection
+        from src.db_base import get_connection
         conn = get_connection()
         c = conn.cursor()
         c.execute("SELECT birthday FROM participants WHERE name = ? LIMIT 1", (name,))
@@ -600,7 +600,7 @@ if view_mode == "⚙️ Admin-Bereich" and is_admin:
 
     with tab_logins:
         st.subheader("Letzte Logins (Global)")
-        from src.database import get_login_history
+        from src.db_base import get_login_history
         history = get_login_history(limit=50)
         if history:
             df_hist = pd.DataFrame(history)
@@ -635,7 +635,7 @@ if view_mode == "⚙️ Admin-Bereich" and is_admin:
         st.subheader("🎓 Voraussetzungen für Hochstufung (Prüfungsbereit)")
         st.caption("Lege fest, wie viel Prozent der Module einer Stufe absolviert sein müssen, damit eine Person als bereit für die nächste Stufe vorgeschlagen wird.")
         
-        from src.database import get_promotion_config, update_promotion_config
+        from src.db_base import get_promotion_config, update_promotion_config
         p_cfg = get_promotion_config(1)
         
         with st.form("promotion_config_form"):
@@ -890,7 +890,7 @@ if st.session_state.df is not None:
                     "3-Truppführende/r": "QS3", "4-Fertig": "✅ Abgeschlossen"}.get(schritt, schritt)
 
         # Prüfe ob jemand bereit für Hochstufung ist
-        from src.database import get_promotion_config
+        from src.db_base import get_promotion_config
         p_cfg = get_promotion_config(1)
         th_qs1 = p_cfg.get('qs1_threshold', 90)
         th_qs2 = p_cfg.get('qs2_threshold', 90)
@@ -1273,7 +1273,7 @@ if st.session_state.df is not None:
         st.subheader("📄 Original Ausdruck (PDF)")
         try:
             target_name = p.strip()
-            from src.database import get_person_pdf_cache
+            from src.db_base import get_person_pdf_cache
             cached_pdf_bytes = get_person_pdf_cache(1, target_name)
             
             if cached_pdf_bytes:
