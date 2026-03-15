@@ -158,12 +158,24 @@ if st.query_params.get("view") == "public":
         # Fülle None/NaN mit "Sonstige" so we can sort them
         p_df['qs_level'] = p_df['qs_level'].fillna("Sonstige")
         
-        # Determine strict drawing order with a map
-        qs_sort_map = {"QS1": 1, "QS2": 2, "QS3": 3, "Ergänzungsmodule": 4, "EStabK": 5, "Sonstige": 99}
-        p_df['sort_key'] = p_df['qs_level'].map(lambda x: qs_sort_map.get(str(x).strip(), 99))
-        p_df = p_df.sort_values(by=['sort_key', 'module_name'])
+        # Determine strict drawing order with a more lenient map
+        qs_sort_map = {"QS1": 1, "QS2": 2, "QS3": 3, "Ergänzung": 4, "EStabK": 5, "Sonstige": 99}
+        def get_qs_rank(val):
+            val_s = str(val).upper()
+            for k, v in qs_sort_map.items():
+                if k.upper() in val_s: return v
+            return 99
+            
+        p_df['sort_level'] = p_df['qs_level'].apply(get_qs_rank)
         
-        unique_l = sorted(p_df['qs_level'].unique(), key=lambda x: qs_sort_map.get(x, 99))
+        # Apply natural sorting for module IDs and names
+        from src.data import natural_sort_key
+        p_df['id_sort_key'] = p_df['id'].fillna("").apply(natural_sort_key)
+        p_df['module_sort_key'] = p_df['module_name'].apply(natural_sort_key)
+        
+        p_df = p_df.sort_values(by=['sort_level', 'id_sort_key', 'module_sort_key'])
+        
+        unique_l = sorted(p_df['qs_level'].unique(), key=get_qs_rank)
         tabs = st.tabs([str(l) for l in unique_l] + ["Alle"])
         
         # Calculate Mock Progress for the view based on status, matching admin view logic
@@ -486,7 +498,7 @@ with st.sidebar:
     if 'selected_person' not in st.session_state:
         st.session_state.selected_person = st.query_params.get("person", None)
         
-    views = ["Gesamtübersicht", "QS1 - Einsatzfähigkeit", "QS2 - Truppmitglied", "QS3 - Truppführende/r", "EStabK"]
+    views = ["Gesamtübersicht", "QS1 - Einsatzfähigkeit", "QS2 - Truppmitglied", "QS3 - Truppführende/r", "EStabK", "🎓 Lehrgangs-Check"]
     if is_admin:
         views.append("⚙️ Admin-Bereich")
         
@@ -795,6 +807,120 @@ if view_mode == "⚙️ Admin-Bereich" and is_admin:
 
     st.stop() # Main content ends here for Admin tab
 
+# --- 3. LEHRGANGS-CHECK ---
+if view_mode == "🎓 Lehrgangs-Check":
+    st.header("🎓 Lehrgangs-Check")
+    st.info("Prüfe, welche Teilnehmer für bestimmte Module in Frage kommen.")
+    
+    if st.session_state.df is not None:
+        df = st.session_state.df
+        
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            qs_options = sorted(df['qs_level'].unique())
+            sel_qs = st.selectbox("Ziel-QS-Stufe", options=qs_options)
+            
+        with col2:
+            # Get all available modules for selection
+            from src.data import natural_sort_key
+            available_modules = sorted(
+                df['id'].unique().tolist(),
+                key=natural_sort_key
+            )
+            # Create labels: "ID (Title)"
+            mod_titles_full = df[['id', 'module_name']].drop_duplicates().set_index('id')['module_name'].to_dict()
+            mod_labels = [f"{m} - {mod_titles_full.get(m, 'Unknown')}" for m in available_modules]
+            
+            sel_mod_labels = st.multiselect(
+                "Module auswählen", 
+                options=mod_labels,
+                help="Wähle die Module aus, die für den Lehrgang relevant sind."
+            )
+            
+        if sel_mod_labels:
+            # 1. Extract IDs from labels
+            selected_modules = [l.split(' - ')[0] for l in sel_mod_labels]
+            
+            # 2. Build Matrix
+            # df contains the latest status for each person/module
+            # Filter for selected modules
+            mod_subset = df[df['id'].isin(selected_modules)].copy()
+            
+            # Filter participants by selected QS
+            people_at_rank = df[df['qs_level'] == sel_qs]['person_name'].unique()
+            
+            if len(people_at_rank) == 0:
+                st.warning(f"Keine Personen in der QS-Stufe '{sel_qs}' gefunden.")
+            else:
+                # Get subset of data for these people and these modules
+                # Note: df might not have all 'Fehlt' modules if they weren't in the upload
+                # We should pivot and then fill missing columns
+                
+                # Check for module labels/titles to show them nicely
+                mod_titles = df[df['id'].isin(selected_modules)][['id', 'module_name']].drop_duplicates().set_index('id')['module_name'].to_dict()
+                
+                # Pivot
+                # Filter df to only these people and these modules
+                plot_df = df[(df['person_name'].isin(people_at_rank)) & (df['id'].isin(selected_modules))]
+                
+                if plot_df.empty:
+                    # Create empty matrix if no data found for these modules
+                    matrix_df = pd.DataFrame(index=people_at_rank)
+                else:
+                    matrix_df = plot_df.pivot_table(
+                        index='person_name',
+                        columns='id',
+                        values='status',
+                        aggfunc='first'
+                    )
+                
+                # Ensure all selected modules are present
+                for m in selected_modules:
+                    if m not in matrix_df.columns:
+                        matrix_df[m] = "Fehlt"
+                
+                matrix_df = matrix_df.fillna("Fehlt")
+                
+                # Count missing
+                def count_missing(row):
+                    return sum(1 for v in row if str(v).strip() != "Absolviert")
+                
+                matrix_df['Offene Module'] = matrix_df.apply(count_missing, axis=1)
+                matrix_df = matrix_df.sort_values(by='Offene Module', ascending=False)
+                
+                # Map column names for display if possible (show ID and title)
+                display_cols = ['Offene Module'] + selected_modules
+                col_rename = {m: f"{m}\n({mod_titles.get(m, 'Unknown')})" for m in selected_modules}
+                
+                # Styling
+                def highlight_status(val):
+                    v_s = str(val).strip()
+                    if v_s == "Absolviert":
+                        return 'background-color: #d1f7d1; color: #1a5e1a'
+                    elif v_s == "In Ausbildung":
+                        return 'background-color: #fff4d1; color: #7a5a00'
+                    elif v_s == "Fehlt" or not v_s:
+                        return 'background-color: #f7d1d1; color: #5e1a1a'
+                    return ''
+
+                st.write(f"Vorschlagsliste für **{len(people_at_rank)} Teilnehmer** in **{sel_qs}**:")
+                st.dataframe(
+                    matrix_df[display_cols].rename(columns=col_rename).style.applymap(highlight_status, subset=[col_rename.get(m, m) for m in selected_modules]),
+                    use_container_width=True
+                )
+        else:
+            st.info("Bitte gib oben Modul-IDs ein, um die Analyse zu starten.")
+            st.markdown("""
+            **Anleitung:**
+            - Gib einzelne Module an (z.B. `1.1`).
+            - Nutze Bereiche (z.B. `10.0-10.2`).
+            - Trenne mehrere Angaben durch Kommas.
+            """)
+    else:
+        st.warning("Keine Daten geladen. Bitte im Dashboard zuerst Daten laden.")
+
+    st.stop()
+
 
 # --- 2. NORMALE DATENANSICHT (Braucht df) ---
 if st.session_state.df is not None:
@@ -1037,7 +1163,22 @@ if st.session_state.df is not None:
             else:
                 display_mod_stats = display_mod_stats[display_mod_stats['QS-Stufe'].astype(str).str.contains(qs_prefix, case=False)]
             
-        st.dataframe(display_mod_stats, column_config={"Quote": st.column_config.ProgressColumn("Quote", format="%.0f%%", min_value=0, max_value=100)}, use_container_width=True, hide_index=True)
+        if not display_mod_stats.empty:
+            from src.data import natural_sort_key
+            qs_sort_map = {"QS1": 1, "QS2": 2, "QS3": 3, "Ergänzung": 4, "EStabK": 5, "Sonstige": 99}
+            def get_qs_rank_stats(val):
+                val_s = str(val).upper()
+                for k, v in qs_sort_map.items():
+                    if k.upper() in val_s: return v
+                return 99
+            
+            display_mod_stats['level_sort'] = display_mod_stats['QS-Stufe'].apply(get_qs_rank_stats)
+            display_mod_stats['id_sort_key'] = display_mod_stats['ID'].fillna("").apply(natural_sort_key)
+            display_mod_stats['module_sort_key'] = display_mod_stats['Modul'].apply(natural_sort_key)
+            display_mod_stats = display_mod_stats.sort_values(by=['level_sort', 'id_sort_key', 'module_sort_key'])
+            st.dataframe(display_mod_stats.drop(columns=['level_sort', 'id_sort_key', 'module_sort_key'], errors='ignore'), column_config={"Quote": st.column_config.ProgressColumn("Quote", format="%.0f%%", min_value=0, max_value=100)}, use_container_width=True, hide_index=True)
+        else:
+            st.info("Keine Statistikdaten verfügbar.")
 
     else:
         # Individual View
@@ -1221,7 +1362,16 @@ if st.session_state.df is not None:
             except: pass
 
         st.divider()
-        unique_l = sorted(p_df['qs_level'].unique())
+        # Determine accurate tab sorting
+        qs_sort_map = {"QS1": 1, "QS2": 2, "QS3": 3, "Ergänzung": 4, "EStabK": 5, "Sonstige": 99}
+        def get_qs_rank_admin(val):
+            val_s = str(val).upper()
+            for k, v in qs_sort_map.items():
+                if k.upper() in val_s: return v
+            return 99
+            
+        unique_l = sorted(p_df['qs_level'].unique(), key=get_qs_rank_admin)
+        
         tabs = st.tabs([str(l) for l in unique_l] + ["Alle"])
         cfg = {
             "Progress": st.column_config.ProgressColumn("Erfüllung", format="%.0f%%", min_value=0, max_value=100),
@@ -1233,8 +1383,24 @@ if st.session_state.df is not None:
             "K_Soll": st.column_config.NumberColumn("KatS (Soll)", format="%.2f h")
         }
         for i, l in enumerate(unique_l):
-            with tabs[i]: st.dataframe(p_df[p_df['qs_level'] == l], use_container_width=True, column_config=cfg, hide_index=True)
-        with tabs[-1]: st.dataframe(p_df, use_container_width=True, column_config=cfg, hide_index=True)
+            sub_df = p_df[p_df['qs_level'] == l].copy()
+            # Apply natural sorting for individual view tabs - use 'id' if available (like "1.0")
+            from src.data import natural_sort_key
+            sub_df['id_sort_key'] = sub_df['id'].fillna("").apply(natural_sort_key) if 'id' in sub_df.columns else sub_df.index
+            sort_col = 'title' if 'title' in sub_df.columns else 'module_name'
+            sub_df['module_sort_key'] = sub_df[sort_col].apply(natural_sort_key)
+            sub_df = sub_df.sort_values(by=['id_sort_key', 'module_sort_key'])
+            with tabs[i]: st.dataframe(sub_df.drop(columns=['id_sort_key', 'module_sort_key'], errors='ignore'), use_container_width=True, column_config=cfg, hide_index=True)
+            
+        # Overall view sorting
+        from src.data import natural_sort_key
+        p_df['sort_level'] = p_df['qs_level'].apply(get_qs_rank_admin)
+        p_df['id_sort_key'] = p_df['id'].fillna("").apply(natural_sort_key) if 'id' in p_df.columns else p_df.index
+        sort_col = 'title' if 'title' in p_df.columns else 'module_name'
+        p_df['module_sort_key'] = p_df[sort_col].apply(natural_sort_key)
+        p_df_sorted = p_df.sort_values(by=['sort_level', 'id_sort_key', 'module_sort_key'])
+        
+        with tabs[-1]: st.dataframe(p_df_sorted.drop(columns=['sort_level', 'id_sort_key', 'module_sort_key'], errors='ignore'), use_container_width=True, column_config=cfg, hide_index=True)
         
         st.write("---")
         st.subheader("📄 Original Ausdruck (PDF)")

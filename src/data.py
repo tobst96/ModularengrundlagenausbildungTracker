@@ -1,6 +1,16 @@
 import pandas as pd
 import numpy as np
 from typing import List, Dict, Any
+import re
+
+def natural_sort_key(s):
+    """
+    Utility for natural sorting of strings containing numbers (e.g., 1.0, 1.1, 1.2, 2.0, 10.0).
+    Returns a tuple for hashability (required for pandas multi-column sorting).
+    """
+    import re
+    return tuple(int(text) if text.isdigit() else text.lower()
+                 for text in re.split(r'(\d+)', str(s)))
 
 def process_training_data(raw_data: List[Dict[str, Any]]) -> pd.DataFrame:
     """

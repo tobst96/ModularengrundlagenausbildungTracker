@@ -1172,7 +1172,7 @@ def get_person_data_public(name: str, birthday: str) -> Optional[Dict[str, Any]]
             p_id = person['id']
             # 2. Module laden
             cur = conn.execute("""
-                SELECT mh.title as module_name, mh.qs_level, mh.status, mh.T_Ist as hours_t, mh.T_Soll as hours_t_soll, mh.P_Ist as hours_p, mh.P_Soll as hours_p_soll, mh.K_Ist as hours_k,  mh.K_Soll as hours_k_soll, mh.date as completed_date
+                SELECT mh.module_id as id, mh.title as module_name, mh.qs_level, mh.status, mh.T_Ist as hours_t, mh.T_Soll as hours_t_soll, mh.P_Ist as hours_p, mh.P_Soll as hours_p_soll, mh.K_Ist as hours_k,  mh.K_Soll as hours_k_soll, mh.date as completed_date
                 FROM module_history mh
                 WHERE mh.participant_id = ?
                 -- Wähle nur die neuesten Einträge pro Modul (falls Duplikate)
