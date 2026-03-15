@@ -14,8 +14,8 @@ if st.session_state.get('username', '').lower() != 'admin':
     st.error("Zugriff verweigert. Diese Seite ist nur für Administratoren zugänglich.")
     st.stop()
     
-tab_ausb, tab_fahrz, tab_email, tab_benut, tab_sync, tab_sich, tab_wart, tab_backup = st.tabs([
-    "🎓 Ausbildungen", "🚒 Fahrzeuge", "✉️ E-Mail", "👥 Benutzer", "🔄 Auto-Download & Sync", "🛡️ Sicherheit", "⚙️ Wartung", "💾 Backup"
+tab_ausb, tab_fahrz, tab_email, tab_benut, tab_sync, tab_sich, tab_wart, tab_update, tab_backup = st.tabs([
+    "🎓 Ausbildungen", "🚒 Fahrzeuge", "✉️ E-Mail", "👥 Benutzer", "🔄 Auto-Download & Sync", "🛡️ Sicherheit", "⚙️ Wartung", "🚀 Update", "💾 Backup"
 ])
 
 # --- TAB AUSBILDUNGEN ---
@@ -554,6 +554,51 @@ with tab_wart:
                 st.error(f"Fehler beim Löschen: {err}")
 
     st.divider()
+
+# --- TAB UPDATE ---
+with tab_update:
+    import src.updater as updater
+    st.subheader("🚀 System-Update")
+    st.caption("Prüfe auf neue Versionen direkt von GitHub und aktualisiere das System.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info(f"**Aktuelle Version (lokal):** `{updater.get_local_commit()}`")
+        st.write(f"Zweig: `{updater.get_current_branch()}`")
+
+    with col2:
+        if st.button("🔍 Auf Updates prüfen", use_container_width=True):
+            remote = updater.get_remote_commit()
+            if remote == "Unknown":
+                st.error("Konnte keine Verbindung zu GitHub herstellen.")
+            else:
+                st.success(f"GitHub Version: `{remote}`")
+                if updater.is_update_available():
+                    st.warning("⚠️ Eine neue Version ist verfügbar!")
+                else:
+                    st.info("Das System ist auf dem neuesten Stand.")
+
+    st.divider()
+    
+    if st.button("🚀 Jetzt Update starten", type="primary", use_container_width=True):
+        with st.status("⏳ Update wird ausgeführt...") as status:
+            st.write("Lade Code von GitHub herunter...")
+            ok_pull, msg_pull = updater.run_git_pull()
+            if ok_pull:
+                st.write("Code aktualisiert. Installiere Abhängigkeiten...")
+                ok_pip, msg_pip = updater.update_dependencies()
+                if ok_pip:
+                    status.update(label="✅ Update erfolgreich abgeschlossen!", state="complete")
+                    st.success("Das System wurde erfolgreich aktualisiert. Die App wird automatisch neu geladen.")
+                    import time
+                    time.sleep(2)
+                    st.rerun()
+                else:
+                    status.update(label="❌ Fehler bei der Installation", state="error")
+                    st.error(f"Fehler bei pip install: {msg_pip}")
+            else:
+                status.update(label="❌ Fehler beim Herunterladen", state="error")
+                st.error(f"Fehler bei git pull: {msg_pull}")
 
 # --- TAB BACKUP ---
 with tab_backup:
