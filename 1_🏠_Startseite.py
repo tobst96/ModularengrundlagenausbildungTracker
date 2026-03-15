@@ -254,6 +254,12 @@ if "scheduler" not in st.session_state:
     scheduler.start()
     logger.info("BackgroundScheduler started for daily jobs and auto-send.")
     st.session_state.scheduler = scheduler
+    
+    # Check for updates immediately on startup to clear notification if we just updated
+    try:
+        sync_upd.check_for_updates()
+    except Exception as e:
+        logger.error(f"Startup update check failed: {e}")
 
 _cookies = streamlit_cookies_manager.CookieManager()
 if not _cookies.ready():

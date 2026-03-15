@@ -3,6 +3,7 @@ import time
 import json
 from datetime import datetime
 import src.db_base as storage
+import src.sync_updater as sync_upd
 
 # Sichern der Seite: Nur für Admins
 if st.session_state.get('username', '').lower() != 'admin':
