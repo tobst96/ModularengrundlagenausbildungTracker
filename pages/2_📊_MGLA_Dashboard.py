@@ -1,7 +1,7 @@
 import streamlit as st
 import datetime
 import qrcode
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import io
 import urllib.parse
 import pandas as pd
@@ -53,6 +53,97 @@ def render_pdf_bytes_to_images(pdf_bytes: bytes):
     except Exception as e:
         logger.error(f"Failed to render cached PDF bytes to images: {e}")
     return images
+
+def render_matrix_to_png(df):
+    import io
+    from PIL import Image, ImageDraw, ImageFont
+    
+    # Constants
+    CELL_WIDTH = 180
+    CELL_HEIGHT = 40
+    HEADER_HEIGHT = 50
+    INDEX_WIDTH = 300
+    
+    # Colors
+    COLOR_SUCCESS = (209, 247, 209)  # #d1f7d1
+    COLOR_PROGRESS = (255, 244, 209)  # #fff4d1
+    COLOR_MISSING = (247, 209, 209)   # #f7d1d1
+    COLOR_GRID = (210, 210, 210)
+    COLOR_TEXT = (40, 40, 40)
+    COLOR_HEADER = (245, 245, 245)
+
+    rows = len(df)
+    cols = len(df.columns)
+    
+    width = INDEX_WIDTH + (cols * CELL_WIDTH)
+    height = HEADER_HEIGHT + (rows * CELL_HEIGHT)
+    
+    # Create high-res canvas
+    img = Image.new('RGB', (width, height), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    
+    # Attempt to load a nice font, fallback to default
+    try:
+        # macOS Arial
+        font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 16)
+        font_bold = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial Bold.ttf", 18)
+    except:
+        try:
+            # Linux typical paths for TTF
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
+            font_bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
+        except:
+            font = ImageFont.load_default()
+            font_bold = font
+    
+    # Draw Background for Headers
+    draw.rectangle([0, 0, width, HEADER_HEIGHT], fill=COLOR_HEADER)
+    
+    # Draw Vertical Grid Lines and Headers
+    draw.text((15, (HEADER_HEIGHT-20)//2), "Teilnehmer (Name, Vorname)", fill=(0,0,0), font=font_bold)
+    for i, col_name in enumerate(df.columns):
+        x = INDEX_WIDTH + i * CELL_WIDTH
+        # Draw vertical line
+        draw.line([x, 0, x, height], fill=COLOR_GRID, width=1)
+        # Draw header text
+        txt = str(col_name)
+        draw.text((x + 10, (HEADER_HEIGHT-20)//2), txt, fill=(0,0,0), font=font_bold)
+
+    # Draw Horizontal header line
+    draw.line([0, HEADER_HEIGHT, width, HEADER_HEIGHT], fill=COLOR_GRID, width=2)
+
+    # Draw Rows
+    for r_idx, (person_name, row) in enumerate(df.iterrows()):
+        y = HEADER_HEIGHT + r_idx * CELL_HEIGHT
+        
+        # Participant Name
+        draw.text((15, y + (CELL_HEIGHT-18)//2), str(person_name), fill=COLOR_TEXT, font=font)
+        
+        # Cells
+        for c_idx, val in enumerate(row):
+            x = INDEX_WIDTH + c_idx * CELL_WIDTH
+            status = str(val).strip()
+            
+            fill_color = (255, 255, 255)
+            if status == "Absolviert":
+                fill_color = COLOR_SUCCESS
+            elif status == "In Ausbildung":
+                fill_color = COLOR_PROGRESS
+            elif status == "Fehlt" or not status:
+                fill_color = COLOR_MISSING
+                
+            # Cell background
+            draw.rectangle([x+1, y+1, x+CELL_WIDTH-1, y+CELL_HEIGHT-1], fill=fill_color)
+            # Cell text
+            draw.text((x + 10, y + (CELL_HEIGHT-18)//2), status, fill=COLOR_TEXT, font=font)
+            
+        # Row separation line
+        draw.line([0, y + CELL_HEIGHT, width, y + CELL_HEIGHT], fill=COLOR_GRID, width=1)
+
+    # Convert to bytes
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 # --- PUBLIC VIEW ROUTING ---
 if st.query_params.get("view") == "public":
@@ -781,6 +872,21 @@ if view_mode == "🎓 Lehrgangs-Check":
                     matrix_df[display_cols].style.applymap(highlight_status, subset=selected_modules),
                     use_container_width=True
                 )
+                
+                # --- PNG EXPORT BUTTON ---
+                st.write("")
+                col_exp, _ = st.columns([1, 3])
+                with col_exp:
+                    # Clean the dataframe for export (remove 'Offene Module' column)
+                    export_df = matrix_df[selected_modules].copy()
+                    png_data = render_matrix_to_png(export_df)
+                    st.download_button(
+                        label="🖼️ Als Bild (PNG) exportieren",
+                        data=png_data,
+                        file_name=f"Lehrgangscheck_{sel_qs.replace(' ', '_')}.png",
+                        mime="image/png",
+                        use_container_width=True
+                    )
         else:
             st.info("Bitte wähle oben die gewünschten Module aus, um die Analyse zu starten.")
     else:
