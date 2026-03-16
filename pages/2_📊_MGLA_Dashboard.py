@@ -573,7 +573,7 @@ if view_mode == "⚙️ Admin-Bereich" and is_admin:
     
     st.markdown("---")
 
-    tab_persons, tab_logins, tab_promotion = st.tabs(["Personen in DB", "Login-Historie", "🎓 Hochstufung"])
+    tab_persons, tab_promotion = st.tabs(["Personen in DB", "🎓 Hochstufung"])
     
                     
     with tab_persons:
@@ -586,38 +586,6 @@ if view_mode == "⚙️ Admin-Bereich" and is_admin:
             st.dataframe(df_p[['id', 'Name', 'Geburtsdatum', 'Einheit']], hide_index=True, use_container_width=True)
         else:
             st.info("Keine Personen in dieser Einheit gefunden.")
-
-    with tab_logins:
-        st.subheader("Letzte Logins (Global)")
-        from src.db_base import get_login_history
-        history = get_login_history(limit=50)
-        if history:
-            df_hist = pd.DataFrame(history)
-            
-            # Formatiere das Datum schoen
-            df_hist['login_time'] = pd.to_datetime(df_hist['login_time']).dt.strftime('%d.%m.%Y %H:%M:%S')
-            
-            # Status Emojis
-            df_hist['status'] = df_hist['status'].apply(lambda x: "✅ Erfolg" if x == "SUCCESS" else "❌ Fehler")
-            
-            df_hist = df_hist.rename(columns={
-                'username': 'Benutzer',
-                'unit_name': 'Einheit',
-                'login_time': 'Zeitpunkt',
-                'status': 'Status'
-            })
-            # Sicherheitsnetz: Einheit-Spalte ggf. hinzufügen
-            if 'Einheit' not in df_hist.columns:
-                df_hist['Einheit'] = 'Unbekannt'
-            show_cols = [c for c in ['Zeitpunkt', 'Benutzer', 'Einheit', 'Status'] if c in df_hist.columns]
-            st.dataframe(df_hist[show_cols], hide_index=True, use_container_width=True)
-        else:
-            st.info("Noch keine Logins verzeichnet.")
-
-
-    # ---- AUTO-DOWNLOAD TAB ----
-    st.stop() # Main content ends here for Admin tab
-
 
     # ---- PROMOTION CONFIG TAB ----
     with tab_promotion:

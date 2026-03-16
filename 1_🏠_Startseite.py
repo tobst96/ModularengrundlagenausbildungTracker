@@ -365,7 +365,7 @@ def login():
                 success, db_unit_id, db_unit_name, is_admin_flag = storage.verify_user(username, password)
                 if success:
                     client_ip = st.context.headers.get("X-Forwarded-For", "Unknown IP") if hasattr(st, 'context') else "Unknown IP"
-                    storage.log_login(username, client_ip, "Erfolgreich")
+                    storage.log_login(username, client_ip, "SUCCESS")
                     import logging
                     lo = logging.getLogger("TrainingTracker")
                     lo.info(f"User {username} logged in successfully")
@@ -386,7 +386,7 @@ def login():
                     st.rerun()
                 else:
                     client_ip = st.context.headers.get("X-Forwarded-For", "Unknown IP") if hasattr(st, 'context') else "Unknown IP"
-                    storage.log_login(username, client_ip, "Fehlgeschlagen")
+                    storage.log_login(username, client_ip, "FAILED")
                     import logging
                     lo = logging.getLogger("TrainingTracker")
                     lo.warning(f"Failed login attempt for user {username}")

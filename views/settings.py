@@ -525,6 +525,44 @@ with tab_sich:
                 else:
                     st.error(f"Fehler beim Speichern: {err}")
 
+    st.divider()
+    st.write("### 📝 Letzte Logins (Global)")
+    import pandas as pd
+    history = storage.get_login_history(limit=50)
+    if history:
+        df_hist = pd.DataFrame(history)
+        
+        # Formatiere das Datum schön
+        try:
+            df_hist['login_time'] = pd.to_datetime(df_hist['login_time']).dt.strftime('%d.%m.%Y %H:%M:%S')
+        except:
+            pass # Keep as is if parsing fails
+            
+        # Status Emojis (handle SUCCESS, FAILED and German legacy strings)
+        def map_status(s):
+            if s in ["SUCCESS", "Erfolgreich"]:
+                return "✅ Erfolg"
+            return f"❌ Fehler ({s})" if s else "❌ Fehler"
+            
+        df_hist['status'] = df_hist['status'].apply(map_status)
+        
+        df_hist = df_hist.rename(columns={
+            'username': 'Benutzer',
+            'unit_name': 'Einheit',
+            'login_time': 'Zeitpunkt',
+            'status': 'Status',
+            'ip_address': 'IP-Adresse'
+        })
+        
+        # Sicherheitsnetz: Einheit-Spalte ggf. hinzufügen
+        if 'Einheit' not in df_hist.columns:
+            df_hist['Einheit'] = 'Unbekannt'
+            
+        show_cols = [c for c in ['Zeitpunkt', 'Benutzer', 'Einheit', 'Status', 'IP-Adresse'] if c in df_hist.columns]
+        st.dataframe(df_hist[show_cols], hide_index=True, use_container_width=True)
+    else:
+        st.info("Noch keine Logins verzeichnet.")
+
 # --- TAB WARTUNG ---
 with tab_wart:
     # --- DATEN-BEREINIGUNG ---
