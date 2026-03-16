@@ -11,7 +11,7 @@ import re
 import io
 import time
 from src.parser import extract_data_from_pdf
-from src.data import process_training_data, get_summary_stats
+from src.data_service import process_training_data, get_summary_stats
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -513,7 +513,7 @@ with st.sidebar:
                         from src.feueron_downloader import run_download as _run_dl
                         import time
                         from src.db_base import get_latest_upload_data_cached
-                        from src.data import process_training_data
+                        from src.data_service import process_training_data
                         
                         ok, msg = _run_dl(st.session_state.unit_id)
                         if ok:
@@ -671,7 +671,7 @@ if view_mode == "⚙️ Admin-Bereich" and is_admin:
                 
                 # Immediately fetch the data for the new unit
                 from src.db_base import get_latest_upload_data_cached
-                from src.data import process_training_data
+                from src.data_service import process_training_data
                 if db_ok:
                     latest = get_latest_upload_data_cached(unit_id=uid)
                     if latest:
@@ -950,7 +950,7 @@ if view_mode == "⚙️ Admin-Bereich" and is_admin:
                                 st.success(f"{msg}")
                                 # Verhalte dich exakt so wie beim manuellen PDF Upload: Lade die neu gespeicherten DB-Daten und update die Session
                                 from src.db_base import get_latest_upload_data_cached
-                                from src.data import process_training_data
+                                from src.data_service import process_training_data
                                 st.cache_data.clear()
                                 latest = get_latest_upload_data_cached(unit_id=sel_uid)
                                 if latest:

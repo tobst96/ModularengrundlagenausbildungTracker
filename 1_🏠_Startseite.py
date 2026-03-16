@@ -1,3 +1,4 @@
+# Startseite entry point
 import streamlit as st
 import src.db_base as storage
 import src.sync_updater as sync_upd

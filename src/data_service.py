@@ -1,3 +1,4 @@
+# Data processing and analysis logic for Training Tracker
 import pandas as pd
 import numpy as np
 from typing import List, Dict, Any
@@ -11,6 +12,91 @@ def natural_sort_key(s):
     import re
     return tuple(int(text) if text.isdigit() else text.lower()
                  for text in re.split(r'(\d+)', str(s)))
+
+
+def get_participant_ranks(unit_id: int = 1) -> Dict[str, str]:
+    """
+    Returns a mapping of participant names to their current QS-rank.
+    Optimized to fetch all data in a single pass.
+    """
+    from src.db_base import get_connection, get_all_person_qs_status_cached
+    
+    # Pre-fetch birthdays for identification
+    conn = get_connection()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT name, birthday FROM participants WHERE unit_id = ?", (unit_id,))
+        name_to_bday = {r['name'].strip(): r['birthday'] for r in c.fetchall()}
+    finally:
+        conn.close()
+
+    all_qs = get_all_person_qs_status_cached(unit_id)
+    
+    ranks = {}
+    for p_name, bday in name_to_bday.items():
+        status = all_qs.get((p_name, bday), {'qs1_done': False, 'qs2_done': False, 'qs3_done': False})
+        
+        # Consistent rank logic
+        if not status['qs1_done']:
+            rank = "QS1 - Einsatzfähigkeit"
+        elif not status['qs2_done']:
+            rank = "QS2 - Truppmitglied"
+        elif not status['qs3_done']:
+            rank = "QS3 - Truppführende/r"
+        else:
+            rank = "✅ Abgeschlossen"
+            
+        ranks[p_name] = rank
+        
+    return ranks
+
+def get_lehrgangs_check_matrix(df: pd.DataFrame, selected_ranks: List[str], selected_modules: List[str], unit_id: int = 1) -> pd.DataFrame:
+    """
+    Generates the status matrix for the Lehrgangs-Check.
+    Filters by ranks and modules, then pivots.
+    """
+    if df.empty or not selected_ranks or not selected_modules:
+        return pd.DataFrame()
+
+    # 1. Get rank mapping
+    rank_map = get_participant_ranks(unit_id)
+    
+    # 2. Identify people in selected ranks
+    # Processed df has short names in 'person_name'
+    all_people = df['person_name'].unique()
+    people_at_rank = [p for p in all_people if rank_map.get(p) in selected_ranks]
+    
+    if not people_at_rank:
+        return pd.DataFrame()
+
+    # 3. Pivot logic
+    plot_df = df[(df['person_name'].isin(people_at_rank)) & (df['id'].isin(selected_modules))]
+    
+    if plot_df.empty:
+        matrix_df = pd.DataFrame(index=people_at_rank)
+    else:
+        matrix_df = plot_df.pivot_table(
+            index='person_name',
+            columns='id',
+            values='status',
+            aggfunc='first'
+        )
+        matrix_df = matrix_df.reindex(people_at_rank)
+
+    # Ensure all columns present
+    for m in selected_modules:
+        if m not in matrix_df.columns:
+            matrix_df[m] = "Fehlt"
+            
+    matrix_df = matrix_df.fillna("Fehlt")
+    
+    # Add summary column
+    matrix_df['Offene Module'] = matrix_df.apply(
+        lambda row: sum(1 for v in row if str(v).strip() != "Absolviert"), 
+        axis=1
+    )
+    
+    return matrix_df.sort_values(by='Offene Module', ascending=False)
 
 def process_training_data(raw_data: List[Dict[str, Any]]) -> pd.DataFrame:
     """
@@ -98,3 +184,5 @@ def get_summary_stats(df: pd.DataFrame) -> Dict[str, Any]:
         "total_hours_soll": total_hours_soll,
         "overall_progress": overall_progress
     }
+
+

@@ -1,24 +1,24 @@
 import streamlit as st
 import datetime
 import qrcode
-from PIL import Image, ImageDraw, ImageFont
 import io
 import urllib.parse
 import pandas as pd
 import sys
 import os
 import re
-import io
 import time
-from src.parser import extract_data_from_pdf
-from src.data import process_training_data, get_summary_stats
 import json
 import logging
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-os.makedirs(DATA_DIR, exist_ok=True)
+from streamlit_cookies_manager import EncryptedCookieManager
 
-logger = logging.getLogger(__name__)
-
+# Internal imports
+from src.parser import extract_data_from_pdf
+from src.data_service import (
+    process_training_data, get_summary_stats, natural_sort_key, 
+    get_participant_ranks, get_lehrgangs_check_matrix
+)
+from src.utils_vis import render_matrix_to_png, render_pdf_bytes_to_images
 from src.db_base import (
     init_db, save_upload_data, get_person_history, verify_user, init_admin_user, 
     delete_person, delete_all_persons, get_units, create_unit, delete_unit, 
@@ -28,7 +28,10 @@ from src.db_base import (
     log_login, get_login_history, get_feueron_config, save_feueron_config, get_all_feueron_configs,
     save_pdf_cache, get_pdf_cache, get_connection, update_user_password, update_user_admin_status
 )
-from streamlit_cookies_manager import EncryptedCookieManager
+
+# Constants
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+logger = logging.getLogger(__name__)
 
 # Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -38,112 +41,7 @@ st.set_page_config(page_title="Ausbildungs-Tracker", page_icon="🚒", layout="w
 
 
 
-def render_pdf_bytes_to_images(pdf_bytes: bytes):
-    import fitz
-    from PIL import Image
-    images = []
-    try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        # Enhance resolution 4x (approx 288+ DPI) using deep anti-aliasing Matrix
-        mat = fitz.Matrix(4, 4)
-        for page in doc:
-            pix = page.get_pixmap(matrix=mat, alpha=False)
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            images.append(img)
-    except Exception as e:
-        logger.error(f"Failed to render cached PDF bytes to images: {e}")
-    return images
 
-def render_matrix_to_png(df):
-    import io
-    from PIL import Image, ImageDraw, ImageFont
-    
-    # Constants
-    CELL_WIDTH = 180
-    CELL_HEIGHT = 40
-    HEADER_HEIGHT = 50
-    INDEX_WIDTH = 300
-    
-    # Colors
-    COLOR_SUCCESS = (209, 247, 209)  # #d1f7d1
-    COLOR_PROGRESS = (255, 244, 209)  # #fff4d1
-    COLOR_MISSING = (247, 209, 209)   # #f7d1d1
-    COLOR_GRID = (210, 210, 210)
-    COLOR_TEXT = (40, 40, 40)
-    COLOR_HEADER = (245, 245, 245)
-
-    rows = len(df)
-    cols = len(df.columns)
-    
-    width = INDEX_WIDTH + (cols * CELL_WIDTH)
-    height = HEADER_HEIGHT + (rows * CELL_HEIGHT)
-    
-    # Create high-res canvas
-    img = Image.new('RGB', (width, height), color=(255, 255, 255))
-    draw = ImageDraw.Draw(img)
-    
-    # Attempt to load a nice font, fallback to default
-    try:
-        # macOS Arial
-        font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 16)
-        font_bold = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial Bold.ttf", 18)
-    except:
-        try:
-            # Linux typical paths for TTF
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
-            font_bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
-        except:
-            font = ImageFont.load_default()
-            font_bold = font
-    
-    # Draw Background for Headers
-    draw.rectangle([0, 0, width, HEADER_HEIGHT], fill=COLOR_HEADER)
-    
-    # Draw Vertical Grid Lines and Headers
-    draw.text((15, (HEADER_HEIGHT-20)//2), "Teilnehmer (Name, Vorname)", fill=(0,0,0), font=font_bold)
-    for i, col_name in enumerate(df.columns):
-        x = INDEX_WIDTH + i * CELL_WIDTH
-        # Draw vertical line
-        draw.line([x, 0, x, height], fill=COLOR_GRID, width=1)
-        # Draw header text
-        txt = str(col_name)
-        draw.text((x + 10, (HEADER_HEIGHT-20)//2), txt, fill=(0,0,0), font=font_bold)
-
-    # Draw Horizontal header line
-    draw.line([0, HEADER_HEIGHT, width, HEADER_HEIGHT], fill=COLOR_GRID, width=2)
-
-    # Draw Rows
-    for r_idx, (person_name, row) in enumerate(df.iterrows()):
-        y = HEADER_HEIGHT + r_idx * CELL_HEIGHT
-        
-        # Participant Name
-        draw.text((15, y + (CELL_HEIGHT-18)//2), str(person_name), fill=COLOR_TEXT, font=font)
-        
-        # Cells
-        for c_idx, val in enumerate(row):
-            x = INDEX_WIDTH + c_idx * CELL_WIDTH
-            status = str(val).strip()
-            
-            fill_color = (255, 255, 255)
-            if status == "Absolviert":
-                fill_color = COLOR_SUCCESS
-            elif status == "In Ausbildung":
-                fill_color = COLOR_PROGRESS
-            elif status == "Fehlt" or not status:
-                fill_color = COLOR_MISSING
-                
-            # Cell background
-            draw.rectangle([x+1, y+1, x+CELL_WIDTH-1, y+CELL_HEIGHT-1], fill=fill_color)
-            # Cell text
-            draw.text((x + 10, y + (CELL_HEIGHT-18)//2), status, fill=COLOR_TEXT, font=font)
-            
-        # Row separation line
-        draw.line([0, y + CELL_HEIGHT, width, y + CELL_HEIGHT], fill=COLOR_GRID, width=1)
-
-    # Convert to bytes
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
 
 # --- PUBLIC VIEW ROUTING ---
 if st.query_params.get("view") == "public":
@@ -260,7 +158,7 @@ if st.query_params.get("view") == "public":
         p_df['sort_level'] = p_df['qs_level'].apply(get_qs_rank)
         
         # Apply natural sorting for module IDs and names
-        from src.data import natural_sort_key
+        from src.data_service import natural_sort_key
         p_df['id_sort_key'] = p_df['id'].fillna("").apply(natural_sort_key)
         p_df['module_sort_key'] = p_df['module_name'].apply(natural_sort_key)
         
@@ -497,7 +395,7 @@ with st.sidebar:
                         from src.feueron_downloader import run_download as _run_dl
                         import time
                         from src.db_base import get_latest_upload_data_cached
-                        from src.data import process_training_data
+                        from src.data_service import process_training_data
                         
                         logger.debug("Starting FeuerON API download triggered by UI button.")
                         ok, msg = _run_dl(1)
@@ -544,14 +442,14 @@ with st.sidebar:
                                 save_upload_data(
                                     filename=uploaded_file.name, 
                                     processed_data=raw,
-                                    progress_callback=lambda p: prog_storage.progress(p, text=f"Upload in Datenbank... {int(p*100)}%"), 
+                                    progress_callback=lambda p: prog_db.progress(p, text=f"Upload in Datenbank... {int(p*100)}%"), 
                                     unit_id=1
                                 )
                                 
                                 # --- NEU: Bulk-Isolierung der Einzel-PDFs für den schnellen Abruf ---
                                 try:
                                     logger.info("Starte Bulk-Zerschneiden der PDF für Zertifikate (Manueller Upload)...")
-                                    prog_storage.progress(0.0, text="Generiere Einzelzertifikate... 0%")
+                                    prog_db.progress(0.0, text="Generiere Einzelzertifikate... 0%")
                                     from src.parser import extract_all_person_pdfs
                                     from src.db_base import save_person_pdf_cache, clear_person_pdf_cache
                                     import io
@@ -559,7 +457,7 @@ with st.sidebar:
                                     clear_person_pdf_cache(1)
                                     person_pdfs = extract_all_person_pdfs(
                                         io.BytesIO(uploaded_bytes), 
-                                        progress_callback=lambda p: prog_storage.progress(p, text=f"Generiere Einzelzertifikate... {int(p*100)}%")
+                                        progress_callback=lambda p: prog_db.progress(p, text=f"Generiere Einzelzertifikate... {int(p*100)}%")
                                     )
                                     for p_name, p_bytes in person_pdfs.items():
                                         save_person_pdf_cache(1, p_name, p_bytes)
@@ -756,37 +654,12 @@ if view_mode == "🎓 Lehrgangs-Check":
     if st.session_state.df is not None:
         df = st.session_state.df
         
-        # Determine actual current rank for each person (consistent with dashboard)
-        all_qs = get_all_person_qs_status_cached() if db_ok else {}
-        
-        # Pre-fetch birthdays for all people in one go to avoid N database calls
-        conn = get_connection()
-        c = conn.cursor()
-        c.execute("SELECT name, birthday FROM participants WHERE unit_id = 1")
-        name_to_bday = {r['name'].strip(): r['birthday'] for r in c.fetchall()}
-        conn.close()
-
-        def get_rank_simple(name):
-            n = name.split(',')[0].strip()
-            bday = name_to_bday.get(n, "Unknown")
-            status = all_qs.get((n, bday), {'qs1_done': False, 'qs2_done': False, 'qs3_done': False})
-            if not status['qs1_done']: return "QS1 - Einsatzfähigkeit"
-            if not status['qs2_done']: return "QS2 - Truppmitglied"
-            if not status['qs3_done']: return "QS3 - Truppführende/r"
-            return "✅ Abgeschlossen"
-
         col1, col2 = st.columns([1, 2])
         with col1:
             qs_ranks = ["QS1 - Einsatzfähigkeit", "QS2 - Truppmitglied", "QS3 - Truppführende/r", "✅ Abgeschlossen"]
-            sel_qs = st.selectbox("Aktuelle QS-Stufe", options=qs_ranks, index=1) # Default to QS2
+            sel_ranks = st.multiselect("Aktuelle QS-Stufe(n)", options=qs_ranks, default=["QS2 - Truppmitglied"])
         with col2:
-            # Get all available modules for selection
-            from src.data import natural_sort_key
-            available_modules = sorted(
-                df['id'].unique().tolist(),
-                key=natural_sort_key
-            )
-            # Create labels: "ID (Title)"
+            available_modules = sorted(df['id'].unique().tolist(), key=natural_sort_key)
             m_col = 'title' if 'title' in df.columns else 'module_name'
             mod_titles_full = df[['id', m_col]].drop_duplicates().set_index('id')[m_col].to_dict()
             mod_labels = [f"{m} - {mod_titles_full.get(m, 'Unknown')}" for m in available_modules]
@@ -797,63 +670,15 @@ if view_mode == "🎓 Lehrgangs-Check":
                 help="Wähle die Module aus, die für den Lehrgang relevant sind."
             )
             
-        if sel_mod_labels:
-            # 1. Extract IDs from labels
+        if sel_mod_labels and sel_ranks:
             selected_modules = [l.split(' - ')[0] for l in sel_mod_labels]
             
-            # 2. Build Matrix
-            # Calculate rank for each unique person in the unit
-            all_person_names = df['person_name'].unique()
-            # Filter people who are currently in the selected rank
-            # Using a more efficient approach than row-by-row if possible, but let's stick to correctness first
-            people_at_rank = []
-            for p_name in all_person_names:
-                if get_rank_simple(p_name) == sel_qs:
-                    people_at_rank.append(p_name)
+            # Optimized matrix generation via src.data
+            matrix_df = get_lehrgangs_check_matrix(df, sel_ranks, selected_modules)
             
-            if len(people_at_rank) == 0:
-                st.warning(f"Keine Personen in der QS-Stufe '{sel_qs}' gefunden.")
+            if matrix_df.empty:
+                st.warning(f"Keine Personen in den gewählten QS-Stufen gefunden.")
             else:
-                # Get subset of data for these people and these modules
-                # Note: df might not have all 'Fehlt' modules if they weren't in the upload
-                # We should pivot and then fill missing columns
-                
-                # Check for module labels/titles to show them nicely
-                m_col = 'title' if 'title' in df.columns else 'module_name'
-                mod_titles = df[df['id'].isin(selected_modules)][['id', m_col]].drop_duplicates().set_index('id')[m_col].to_dict()
-                
-                # Pivot
-                # Filter df to only these people and these modules
-                plot_df = df[(df['person_name'].isin(people_at_rank)) & (df['id'].isin(selected_modules))]
-                
-                if plot_df.empty:
-                    # Create empty matrix if no data found for these modules
-                    matrix_df = pd.DataFrame(index=people_at_rank)
-                else:
-                    matrix_df = plot_df.pivot_table(
-                        index='person_name',
-                        columns='id',
-                        values='status',
-                        aggfunc='first'
-                    )
-                    # Ensure all people are present, even if they have no entries for these modules
-                    matrix_df = matrix_df.reindex(people_at_rank)
-                
-                # Ensure all selected modules are present
-                for m in selected_modules:
-                    if m not in matrix_df.columns:
-                        matrix_df[m] = "Fehlt"
-                
-                matrix_df = matrix_df.fillna("Fehlt")
-                
-                # Count missing
-                def count_missing(row):
-                    return sum(1 for v in row if str(v).strip() != "Absolviert")
-                
-                matrix_df['Offene Module'] = matrix_df.apply(count_missing, axis=1)
-                matrix_df = matrix_df.sort_values(by='Offene Module', ascending=False)
-                
-                # Map column names for display (show ONLY ID to keep table slim)
                 display_cols = ['Offene Module'] + selected_modules
                 
                 # Styling
@@ -867,9 +692,10 @@ if view_mode == "🎓 Lehrgangs-Check":
                         return 'background-color: #f7d1d1; color: #5e1a1a'
                     return ''
 
-                st.write(f"Vorschlagsliste für **{len(people_at_rank)} Teilnehmer** in **{sel_qs}**:")
+                rank_labels = ", ".join([r.split(' - ')[0] for r in sel_ranks])
+                st.write(f"Vorschlagsliste für **{len(matrix_df)} Teilnehmer** ({rank_labels}):")
                 st.dataframe(
-                    matrix_df[display_cols].style.applymap(highlight_status, subset=selected_modules),
+                    matrix_df[display_cols].style.map(highlight_status, subset=selected_modules),
                     use_container_width=True
                 )
                 
@@ -877,16 +703,17 @@ if view_mode == "🎓 Lehrgangs-Check":
                 st.write("")
                 col_exp, _ = st.columns([1, 3])
                 with col_exp:
-                    # Clean the dataframe for export (remove 'Offene Module' column)
                     export_df = matrix_df[selected_modules].copy()
                     png_data = render_matrix_to_png(export_df)
                     st.download_button(
                         label="🖼️ Als Bild (PNG) exportieren",
                         data=png_data,
-                        file_name=f"Lehrgangscheck_{sel_qs.replace(' ', '_')}.png",
+                        file_name=f"Lehrgangscheck_{rank_labels.replace(', ', '_')}.png",
                         mime="image/png",
                         use_container_width=True
                     )
+        elif not sel_ranks:
+            st.info("Bitte wähle mindestens eine QS-Stufe aus.")
         else:
             st.info("Bitte wähle oben die gewünschten Module aus, um die Analyse zu starten.")
     else:
@@ -1137,7 +964,7 @@ if st.session_state.df is not None:
                 display_mod_stats = display_mod_stats[display_mod_stats['QS-Stufe'].astype(str).str.contains(qs_prefix, case=False)]
             
         if not display_mod_stats.empty:
-            from src.data import natural_sort_key
+            from src.data_service import natural_sort_key
             qs_sort_map = {"QS1": 1, "QS2": 2, "QS3": 3, "Ergänzung": 4, "EStabK": 5, "Sonstige": 99}
             def get_qs_rank_stats(val):
                 val_s = str(val).upper()
@@ -1358,7 +1185,7 @@ if st.session_state.df is not None:
         for i, l in enumerate(unique_l):
             sub_df = p_df[p_df['qs_level'] == l].copy()
             # Apply natural sorting for individual view tabs - use 'id' if available (like "1.0")
-            from src.data import natural_sort_key
+            from src.data_service import natural_sort_key
             sub_df['id_sort_key'] = sub_df['id'].fillna("").apply(natural_sort_key) if 'id' in sub_df.columns else sub_df.index
             sort_col = 'title' if 'title' in sub_df.columns else 'module_name'
             sub_df['module_sort_key'] = sub_df[sort_col].apply(natural_sort_key)
@@ -1366,7 +1193,7 @@ if st.session_state.df is not None:
             with tabs[i]: st.dataframe(sub_df.drop(columns=['id_sort_key', 'module_sort_key'], errors='ignore'), use_container_width=True, column_config=cfg, hide_index=True)
             
         # Overall view sorting
-        from src.data import natural_sort_key
+        from src.data_service import natural_sort_key
         p_df['sort_level'] = p_df['qs_level'].apply(get_qs_rank_admin)
         p_df['id_sort_key'] = p_df['id'].fillna("").apply(natural_sort_key) if 'id' in p_df.columns else p_df.index
         sort_col = 'title' if 'title' in p_df.columns else 'module_name'
