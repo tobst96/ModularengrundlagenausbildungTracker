@@ -11,82 +11,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# === GLOBAL CUSTOM CSS (Graphics Enhancement) ===
-st.markdown("""
-<style>
-    /* Modern Glasscard Look for main blocks */
-    div.block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-    }
-    
-    /* Beautify metric boxes */
-    div[data-testid="metric-container"] {
-        background-color: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(128, 128, 128, 0.2);
-        padding: 1rem;
-        border-radius: 12px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        transition: transform 0.2s ease;
-    }
-    div[data-testid="metric-container"]:hover {
-        transform: translateY(-2px);
-    }
-    
-    /* Make DataFrames pop with slight shadows */
-    div[data-testid="stDataFrame"] {
-        border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    }
-    
-    /* Stylish Tabs */
-    button[data-baseweb="tab"] {
-        font-weight: 500;
-        border-radius: 6px 6px 0 0;
-        transition: background-color 0.2s;
-    }
-    
-    /* Primary buttons */
-    button[data-testid="baseButton-primary"] {
-        border-radius: 8px;
-        font-weight: bold;
-        transition: all 0.2s;
-        box-shadow: 0 2px 4px rgba(255, 75, 75, 0.3);
-    }
-    button[data-testid="baseButton-primary"]:hover {
-        box-shadow: 0 4px 8px rgba(255, 75, 75, 0.5);
-        transform: translateY(-1px);
-    }
-    
-    /* Custom Firetruck Loading Spinner at top right */
-    [data-testid="stStatusWidget"] {
-        display: flex !important;
-        align-items: center !important;
-    }
-    [data-testid="stStatusWidget"] svg {
-        display: none !important; /* Hide default running man */
-    }
-    [data-testid="stStatusWidget"]::before {
-        content: '🚒';
-        font-size: 1.3rem;
-        line-height: 1;
-        margin-right: 8px;
-        animation: flip_icons 2.5s infinite, pulse_scale 0.5s infinite alternate;
-    }
-    @keyframes flip_icons {
-        0%, 19% { content: '🚒'; }
-        20%, 39% { content: '📟'; }
-        40%, 59% { content: '🧯'; }
-        60%, 79% { content: '👨‍🚒'; }
-        80%, 100% { content: '🔥'; }
-    }
-    @keyframes pulse_scale {
-        0% { transform: scale(0.9); }
-        100% { transform: scale(1.1); }
-    }
-</style>
-""", unsafe_allow_html=True)
+from src.utils_ui import apply_custom_design
+apply_custom_design()
+
 
 
 import os

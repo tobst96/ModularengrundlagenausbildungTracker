@@ -1,4 +1,6 @@
 import streamlit as st
+from src.utils_ui import apply_custom_design
+apply_custom_design()
 import time
 import json
 from datetime import datetime
@@ -540,9 +542,13 @@ with tab_sich:
             
         # Status Emojis (handle SUCCESS, FAILED and German legacy strings)
         def map_status(s):
-            if s in ["SUCCESS", "Erfolgreich"]:
+            if not s: return "❌ Unbekannt"
+            s_str = str(s).strip()
+            if s_str.upper() in ["SUCCESS", "ERFOLGREICH", "OK"]:
                 return "✅ Erfolg"
-            return f"❌ Fehler ({s})" if s else "❌ Fehler"
+            if s_str.upper() in ["FAILED", "FEHLER", "ABGEBROCHEN"]:
+                return "❌ Fehlgeschlagen"
+            return f"⚠️ {s_str}"
             
         df_hist['status'] = df_hist['status'].apply(map_status)
         

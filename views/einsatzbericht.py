@@ -1,4 +1,6 @@
 import streamlit as st
+from src.utils_ui import apply_custom_design
+apply_custom_design()
 from datetime import datetime
 from src.db_base import get_vehicles, get_connection
 

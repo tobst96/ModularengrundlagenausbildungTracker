@@ -36,7 +36,10 @@ logger = logging.getLogger(__name__)
 # Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-st.set_page_config(page_title="Ausbildungs-Tracker", page_icon="🚒", layout="wide")
+
+from src.utils_ui import apply_custom_design
+apply_custom_design()
+
 
 
 
