@@ -98,6 +98,16 @@ try:
 except Exception as e:
     db_ok = False
     logger.critical(f"DB Error during initialization: {e}")
+    # Try to run maintenance anyway to clear duplicates that might have caused index failure
+    try:
+        from src.database.maintenance import merge_duplicate_participants
+        merge_duplicate_participants()
+        # Try init_db again after cleanup
+        init_db()
+        db_ok = True
+        logger.info("DB recovered after maintenance cleanup.")
+    except Exception as e2:
+        logger.critical(f"DB Recovery failed: {e2}")
     # Also log to dynamic root just in case
     print(f"CRITICAL DB ERROR: {e} at path {_SQLITE_PATH}")
 

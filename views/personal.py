@@ -257,8 +257,12 @@ else:
         c_bday.write(f"{p['birthday']} ({calc_age(p['birthday'])})")
         
         # QS-Stufe 
-        cur_qs = str(p.get('qs_level', '-'))
-        c_qs.write(cur_qs)
+        from src.data_service import get_qs_rank_label
+        qs1 = bool(p.get('qs1_done'))
+        qs2 = bool(p.get('qs2_done'))
+        qs3 = bool(p.get('qs3_done'))
+        cur_qs = get_qs_rank_label(qs1, qs2, qs3)
+        c_qs.write(cur_qs.split(' - ')[0]) # Show short version but same logic
         
         # Ablauf
         expiry_str = calc_expiry(p.get('last_seen'))

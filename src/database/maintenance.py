@@ -20,9 +20,9 @@ def merge_duplicate_participants():
             
             # 1. Find potential duplicates (normalized Name + Birthday)
             query = """
-                SELECT name, birthday, COUNT(*) as cnt
+                SELECT TRIM(name) as name, TRIM(birthday) as birthday, COUNT(*) as cnt
                 FROM participants
-                GROUP BY name, birthday
+                GROUP BY TRIM(name), TRIM(birthday)
                 HAVING cnt > 1
             """
             cursor.execute(query)
@@ -36,8 +36,8 @@ def merge_duplicate_participants():
                 name, bday = dup['name'], dup['birthday']
                 logger.info(f"Merging duplicates for: {name} ({bday})")
                 
-                # Get all IDs for this specific duplicate group
-                cursor.execute("SELECT id FROM participants WHERE name = ? AND birthday = ? ORDER BY id ASC", (name, bday))
+                # Get all IDs for this specific duplicate group (using TRIM for grouping)
+                cursor.execute("SELECT id FROM participants WHERE TRIM(name) = ? AND TRIM(birthday) = ? ORDER BY id ASC", (name, bday))
                 ids = [r['id'] for r in cursor.fetchall()]
                 
                 # Decide which ID is "Primary" (the one with the most history)

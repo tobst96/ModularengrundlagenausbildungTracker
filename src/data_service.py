@@ -14,6 +14,24 @@ def natural_sort_key(s):
                  for text in re.split(r'(\d+)', str(s)))
 
 
+def get_qs_rank_label(qs1_done: bool, qs2_done: bool, qs3_done: bool) -> str:
+    """
+    Standardizes the rank label based on QS flags.
+    一致性: 
+    - QS1 incomplete -> QS1 - Einsatzfähigkeit (Working on QS1)
+    - QS1 done, QS2 incomplete -> QS2 - Truppmitglied (Working on QS2)
+    - QS2 done, QS3 incomplete -> QS3 - Truppführende/r (Working on QS3)
+    - All done -> ✅ Abgeschlossen
+    """
+    if not qs1_done:
+        return "QS1 - Einsatzfähigkeit"
+    elif not qs2_done:
+        return "QS2 - Truppmitglied"
+    elif not qs3_done:
+        return "QS3 - Truppführende/r"
+    else:
+        return "✅ Abgeschlossen"
+
 def get_participant_ranks(unit_id: int = 1) -> Dict[str, str]:
     """
     Returns a mapping of participant names to their current QS-rank.
@@ -35,18 +53,7 @@ def get_participant_ranks(unit_id: int = 1) -> Dict[str, str]:
     ranks = {}
     for p_name, bday in name_to_bday.items():
         status = all_qs.get((p_name, bday), {'qs1_done': False, 'qs2_done': False, 'qs3_done': False})
-        
-        # Consistent rank logic
-        if not status['qs1_done']:
-            rank = "QS1 - Einsatzfähigkeit"
-        elif not status['qs2_done']:
-            rank = "QS2 - Truppmitglied"
-        elif not status['qs3_done']:
-            rank = "QS3 - Truppführende/r"
-        else:
-            rank = "✅ Abgeschlossen"
-            
-        ranks[p_name] = rank
+        ranks[p_name] = get_qs_rank_label(status['qs1_done'], status['qs2_done'], status['qs3_done'])
         
     return ranks
 

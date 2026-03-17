@@ -52,7 +52,16 @@ def get_participants_with_qualifications(unit_id: int = None) -> List[Dict[str, 
         conn = get_connection()
         try:
             cursor = conn.cursor()
-            query = "SELECT p.id, p.name, p.birthday, group_concat(q.name, ', ') as quals FROM participants p LEFT JOIN participant_qualifications pq ON p.id = pq.participant_id LEFT JOIN qualifications q ON pq.qualification_id = q.id"
+            query = """
+                SELECT 
+                    p.id, p.name, p.birthday, p.last_seen, p.einsatzstunden, p.dienststunden,
+                    group_concat(q.name, ', ') as quals,
+                    s.qs1_done, s.qs2_done, s.qs3_done
+                FROM participants p 
+                LEFT JOIN participant_qualifications pq ON p.id = pq.participant_id 
+                LEFT JOIN qualifications q ON pq.qualification_id = q.id
+                LEFT JOIN person_qs_status s ON p.id = s.participant_id
+            """
             params = []
             if unit_id:
                 query += " WHERE p.unit_id = ?"

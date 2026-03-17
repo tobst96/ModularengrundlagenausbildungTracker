@@ -16,7 +16,7 @@ from streamlit_cookies_manager import EncryptedCookieManager
 from src.parser import extract_data_from_pdf
 from src.data_service import (
     process_training_data, get_summary_stats, natural_sort_key, 
-    get_participant_ranks, get_lehrgangs_check_matrix
+    get_participant_ranks, get_lehrgangs_check_matrix, get_qs_rank_label
 )
 from src.utils_vis import render_matrix_to_png, render_pdf_bytes_to_images
 from src.db_base import (
@@ -138,12 +138,14 @@ if st.query_params.get("view") == "public":
         total_hours_ist = p_df['hours_t'].sum() + p_df['hours_p'].sum() + p_df['hours_k'].sum()
         total_hours_soll = p_df['hours_t_soll'].sum() + p_df['hours_p_soll'].sum() + p_df['hours_k_soll'].sum()
         
-        # Render Beautiful Metrics
+        # Render Beautiful Metrics 
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Ausbildungsstand", "Einsatzbereit" if qs1_done else "In Ausbildung", "QS1 erfüllt" if qs1_done else None, delta_color="normal" if qs1_done else "off")
         col2.metric("Absolvierte Module", f"{completed_modules} / {total_modules}", f"{avg_progress:.0f}% Gesamt")
         col3.metric("Gesamtstunden (Ist)", f"{total_hours_ist:.1f} h", f"{total_hours_ist - total_hours_soll:+.1f} h Soll-Delta" if total_hours_soll else None, delta_color="off")
-        col4.metric("Aktuelle QS-Stufe", "QS3" if qs3_done else "QS2" if qs2_done else "QS1" if qs1_done else "Anwärter")
+        
+        rank_label = get_qs_rank_label(qs1_done, qs2_done, qs3_done)
+        col4.metric("Aktuelle QS-Stufe", rank_label.split(' - ')[0]) # Show short version but logic same
         
         st.write("") # Spacer
         
