@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from .core import get_connection, _lock
 
 logger = logging.getLogger(__name__)

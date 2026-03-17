@@ -6,7 +6,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Core database path and lock
-_SQLITE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "local_cache.db")
+def get_db_path():
+    # Primary: Absolute path based on the directory of this file
+    # This file is at root/src/database/core.py. 
+    # Root is up 3 levels.
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    path = os.path.join(base_dir, "data", "local_cache.db")
+    return path
+
+_SQLITE_PATH = get_db_path()
 os.makedirs(os.path.dirname(_SQLITE_PATH), exist_ok=True)
 _lock = threading.Lock()
 
@@ -22,20 +30,18 @@ def init_db():
     with _lock:
         conn = get_connection()
         try:
-            logger.debug("Initializing database schema...")
+            logger.info(f"Checking database at: {_SQLITE_PATH}")
+            print(f"DEBUG: Checking database at: {_SQLITE_PATH}")
+            
+            c = conn.cursor()
+            
+            # 1. Base Tables Creation
+            logger.debug("Creating base tables if missing...")
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS units (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT UNIQUE NOT NULL,
                     public_view_password TEXT DEFAULT 'feuerprofi'
-                );
-                
-                CREATE TABLE IF NOT EXISTS stundennachweis_config (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    unit_id INTEGER UNIQUE NOT NULL,
-                    letzter_zeitraum TEXT,
-                    last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
                 );
                 
                 CREATE TABLE IF NOT EXISTS users (
@@ -44,9 +50,10 @@ def init_db():
                     password_hash TEXT NOT NULL,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     unit_id INTEGER DEFAULT NULL,
+                    is_admin INTEGER DEFAULT 0,
                     FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE SET NULL
                 );
-                
+
                 CREATE TABLE IF NOT EXISTS participants (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
@@ -59,157 +66,88 @@ def init_db():
                     last_seen TEXT DEFAULT CURRENT_DATE,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(name, birthday, unit_id),
+                    unit_id INTEGER,
                     FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE SET NULL
-                );
-                
-                CREATE TABLE IF NOT EXISTS uploads (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    upload_date TEXT DEFAULT CURRENT_TIMESTAMP,
-                    filename TEXT
-                );
-                
-                CREATE TABLE IF NOT EXISTS login_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT NOT NULL,
-                    ip_address TEXT,
-                    status TEXT,
-                    login_time TEXT DEFAULT CURRENT_TIMESTAMP
-                );
-                
-                CREATE TABLE IF NOT EXISTS person_qs_status (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    participant_id INTEGER UNIQUE,
-                    qs1_done INTEGER DEFAULT 0,
-                    qs2_done INTEGER DEFAULT 0,
-                    qs3_done INTEGER DEFAULT 0,
-                    FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE
-                );
-                
-                CREATE TABLE IF NOT EXISTS modules (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    qs_level TEXT,
-                    T_Soll REAL DEFAULT 0.0,
-                    P_Soll REAL DEFAULT 0.0,
-                    K_Soll REAL DEFAULT 0.0
-                );
-                
-                CREATE TABLE IF NOT EXISTS module_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    participant_id INTEGER,
-                    upload_id INTEGER,
-                    module_id TEXT,
-                    status TEXT,
-                    hours REAL,
-                    start_time TEXT,
-                    end_time TEXT,
-                    date TEXT,
-                    T_Ist REAL DEFAULT 0.0,
-                    P_Ist REAL DEFAULT 0.0,
-                    K_Ist REAL DEFAULT 0.0,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE,
-                    FOREIGN KEY (upload_id) REFERENCES uploads(id) ON DELETE CASCADE,
-                    FOREIGN KEY (module_id) REFERENCES modules(id) ON DELETE CASCADE
-                );
-                
-                CREATE TABLE IF NOT EXISTS feueron_sync_config (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    unit_id INTEGER UNIQUE NOT NULL,
-                    feueron_org TEXT,
-                    feueron_org_id TEXT,
-                    feueron_username TEXT,
-                    feueron_password TEXT,
-                    sync_hour INTEGER DEFAULT 3,
-                    sync_minute INTEGER DEFAULT 0,
-                    sync_enabled INTEGER DEFAULT 0,
-                    last_sync_at TEXT,
-                    last_sync_status TEXT,
-                    last_sync_message TEXT,
-                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
-                );
-                
-                CREATE TABLE IF NOT EXISTS qualifications (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE NOT NULL,
-                    value INTEGER NOT NULL,
-                    prerequisite_id INTEGER,
-                    equivalent_id INTEGER,
-                    FOREIGN KEY (prerequisite_id) REFERENCES qualifications (id) ON DELETE SET NULL,
-                    FOREIGN KEY (equivalent_id) REFERENCES qualifications (id) ON DELETE SET NULL
-                );
-                
-                CREATE TABLE IF NOT EXISTS participant_qualifications (
-                    participant_id INTEGER,
-                    qualification_id INTEGER,
-                    assigned_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (participant_id, qualification_id),
-                    FOREIGN KEY (participant_id) REFERENCES participants (id) ON DELETE CASCADE,
-                    FOREIGN KEY (qualification_id) REFERENCES qualifications (id) ON DELETE CASCADE
-                );
-                
-                CREATE TABLE IF NOT EXISTS vehicles (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    unit_id INTEGER NOT NULL,
-                    call_sign TEXT NOT NULL,
-                    seats INTEGER NOT NULL DEFAULT 1,
-                    token TEXT UNIQUE,
-                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
-                );
-                
-                CREATE TABLE IF NOT EXISTS incident_reports (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    unit_id INTEGER NOT NULL,
-                    keyword TEXT,
-                    vehicle_id INTEGER,
-                    commander_id INTEGER,
-                    unit_leader_id INTEGER,
-                    crew_json TEXT,
-                    situation TEXT,
-                    actions TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    sent_at TEXT DEFAULT NULL,
-                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE,
-                    FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL,
-                    FOREIGN KEY (commander_id) REFERENCES participants(id) ON DELETE SET NULL,
-                    FOREIGN KEY (unit_leader_id) REFERENCES participants(id) ON DELETE SET NULL
-                );
-                
-                CREATE TABLE IF NOT EXISTS email_config (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    unit_id INTEGER UNIQUE NOT NULL,
-                    smtp_server TEXT,
-                    smtp_port INTEGER,
-                    smtp_user TEXT,
-                    smtp_password TEXT,
-                    sender_email TEXT,
-                    recipient_emails TEXT,
-                    delay_minutes INTEGER DEFAULT 60,
-                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
-                );
-                
-                CREATE TABLE IF NOT EXISTS promotion_config (
-                    unit_id INTEGER PRIMARY KEY,
-                    qs1_threshold INTEGER DEFAULT 90,
-                    qs2_threshold INTEGER DEFAULT 90,
-                    qs3_threshold INTEGER DEFAULT 100,
-                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
+                    -- UNIQUE constraint intentionally omitted here if table already exists without unit_id
                 );
                 
                 CREATE TABLE IF NOT EXISTS auto_update_config (
-                    id INTEGER PRIMARY KEY CHECK (id = 1), -- Nur ein Eintrag erlaubt
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
                     update_day INTEGER NOT NULL,
                     update_hour INTEGER NOT NULL,
                     update_minute INTEGER NOT NULL,
                     last_check_at TEXT,
-                    update_available INTEGER DEFAULT 0
+                    update_available INTEGER DEFAULT 0,
+                    remote_commit TEXT DEFAULT NULL,
+                    auto_update_enabled INTEGER DEFAULT 1
                 );
                 
-                -- Standardwerte einfügen falls Tabelle leer
                 INSERT OR IGNORE INTO auto_update_config (id, update_day, update_hour, update_minute)
-                VALUES (1, 0, 3, 0); -- Montag 03:00 Uhr
+                VALUES (1, 0, 3, 0);
+
+                CREATE TABLE IF NOT EXISTS pdf_cache (
+                    unit_id INTEGER PRIMARY KEY,
+                    pdf_content BLOB,
+                    filename TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
+                );
             """)
+
+            # 2. Key Table Migrations (Explicit Checks)
+            def add_column_if_missing(table, column, definition):
+                try:
+                    c.execute(f"SELECT {column} FROM {table} LIMIT 1")
+                    print(f"DEBUG: Column {column} in {table} already exists.")
+                except sqlite3.OperationalError as e:
+                    print(f"DEBUG: Adding column {column} to {table} (Error was: {e})")
+                    logger.info(f"Adding missing column {column} to {table}...")
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+                    conn.commit()
+
+            # Fix 'users' table
+            add_column_if_missing("users", "unit_id", "INTEGER DEFAULT NULL")
+            add_column_if_missing("users", "is_admin", "INTEGER DEFAULT 0")
+
+            # Fix 'participants' table
+            add_column_if_missing("participants", "unit_id", "INTEGER DEFAULT NULL")
+
+            # Fix 'auto_update_config'
+            add_column_if_missing("auto_update_config", "remote_commit", "TEXT DEFAULT NULL")
+            add_column_if_missing("auto_update_config", "auto_update_enabled", "INTEGER DEFAULT 1")
+
+            # Fix 'pdf_cache' and 'person_pdf_cache'
+            add_column_if_missing("pdf_cache", "pdf_content", "BLOB")
+            add_column_if_missing("pdf_cache", "filename", "TEXT")
+            
+            # person_pdf_cache table handling
+            try:
+                c.execute("SELECT 1 FROM person_pdf_cache LIMIT 1")
+                add_column_if_missing("person_pdf_cache", "pdf_content", "BLOB")
+            except sqlite3.OperationalError:
+                # Table missing, will be created below or was already handled
+                pass
+
+            # 3. Tables that might be completely missing in older DBs
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS person_pdf_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    unit_id INTEGER,
+                    person_name TEXT,
+                    pdf_content BLOB,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(unit_id, person_name),
+                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
+                );
+            """)
+
+            # 3. Handle specific constraints (like UNIQUE index for participants)
+            # If we just added unit_id, we might want the UNIQUE constraint.
+            # But changing constraints in SQLite requires table rebuild.
+            # For now, let's just make sure the column exists.
+
+            # 4. Final safety commit
             conn.commit()
+            logger.info("Database initialization complete.")
         finally:
             conn.close()

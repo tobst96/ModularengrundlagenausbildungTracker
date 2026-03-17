@@ -83,15 +83,26 @@ if seq_server_url:
 
 logger = logging.getLogger(__name__)
 
+# Database initialization
+from src.database.core import init_db, _SQLITE_PATH
+
+db_ok = True
 try:
-    storage.init_db()
-    admin_pass = os.environ.get("ADMIN_PASSWORD", "admin")
-    storage.init_admin_user("admin", admin_pass)
-    db_ok = True
-    logger.info("Database and Admin user initialized successfully.")
+    init_db()
+    # Log path for debugging
+    logger.info(f"Database successfully connected at: {_SQLITE_PATH}")
 except Exception as e:
-    logger.error(f"DB Error during initialization: {e}")
     db_ok = False
+    logger.critical(f"DB Error during initialization: {e}")
+    # Also log to dynamic root just in case
+    print(f"CRITICAL DB ERROR: {e} at path {_SQLITE_PATH}")
+
+if not db_ok:
+    st.error("❌ Kritischer Datenbankfehler!")
+    st.warning(f"Pfad: `{_SQLITE_PATH}`")
+    st.info("Die Datenbank konnte nicht initialisiert werden. Bitte prüfen Sie die Berechtigungen oder ob der Pfad existiert.")
+    st.stop()
+
 import streamlit_cookies_manager
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -153,7 +164,7 @@ def check_unsent_reports():
     except Exception as e:
         logger.error(f"check_unsent_reports failed: {e}")
 
-if "scheduler" not in st.session_state:
+if "scheduler" not in st.session_state and db_ok:
     scheduler = BackgroundScheduler()
     # Runs everyday at midnight (00:00)
     scheduler.add_job(storage.delete_expired_participants, 'cron', hour=0, minute=0, args=[360])
@@ -163,13 +174,12 @@ if "scheduler" not in st.session_state:
     
     # --- UPDATE JOBS ---
     # Daily update check at 02:00
+    import src.sync_updater as sync_upd
     scheduler.add_job(sync_upd.check_for_updates, 'cron', hour=2, minute=0)
     
     # Weekly auto-update
     upd_config = storage.get_auto_update_config()
     if upd_config:
-        # APScheduler uses 0-6 for mon-sun or strings like 'mon', 'tue'... 
-        # Our DB stores 0-6.
         scheduler.add_job(
             sync_upd.perform_auto_update, 
             'cron', 

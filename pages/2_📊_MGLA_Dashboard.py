@@ -377,7 +377,7 @@ if st.session_state.df is None and 1:
 with st.sidebar:
     st.header("⚙️ Menü")
     
-    is_admin = st.session_state.get('username', '').lower() == 'admin'
+    is_admin = st.session_state.get('is_admin', False)
     
         
     st.divider()
@@ -815,7 +815,7 @@ if st.session_state.df is not None:
             st.subheader(f"🎯 Bereit für Prüfung ({len(promotable)})")
             
             # Admin "Alle Hochstufen" Button
-            if st.session_state.get('username', '').lower() == 'admin' and len(promotable) > 1:
+            if st.session_state.get('is_admin', False) and len(promotable) >= 1:
                 if st.button("🚀 Alle vorgeschlagenen Teilnehmer hochstufen", type="primary", use_container_width=True):
                     with st.spinner("Stufe alle Teilnehmer hoch..."):
                         curr_unit = 1
@@ -846,7 +846,7 @@ if st.session_state.df is not None:
             st.divider()
 
         # Admin: Alle Personen löschen
-        if st.session_state.get('username', '').lower() == 'admin':
+        if st.session_state.get('is_admin', False):
             with st.expander("🔴 Admin: Alle Personen löschen", expanded=False):
                 st.warning("⚠️ Löscht ALLE Teilnehmer aus der Datenbank. Nicht rückgängig zu machen!")
                 _del_confirm_key = "admin_delete_all_confirm"
