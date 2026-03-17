@@ -416,5 +416,40 @@ with st.sidebar:
             sync_upd.perform_force_update()
 
 
+    # --- DEBUG INFO ---
+    if st.session_state.get('username') == 'admin':
+        with st.sidebar.expander("🛠️ Debug Info", expanded=False):
+            st.write(f"CWD: `{os.getcwd()}`")
+            import src.database.participants as p
+            import src.database.core as c
+            import src.sync_updater as sync
+            st.write(f"Commit (Local): `{sync.get_local_commit()}`")
+            st.write(f"Commit (Remote): `{sync.get_remote_commit()}`")
+            st.write(f"Module Path: `{p.__file__}`")
+            
+            if st.button("Check Felix Lookup", key="debug_check_felix"):
+                name, bday = "Felix Weitz", "20.09.1999"
+                res = storage.get_person_data_public(name, bday)
+                st.write(f"Result for {name}:")
+                if res:
+                    st.json(res)
+                else:
+                    st.error("NOT FOUND")
+                    conn = c.get_connection()
+                    cur = conn.cursor()
+                    cur.execute("SELECT id, name, birthday FROM participants WHERE name LIKE ?", (f"%{name}%",))
+                    matches = cur.fetchall()
+                    st.write("Similar Names in DB:")
+                    st.write([dict(m) for m in matches])
+                    conn.close()
+
+            if st.button("🔄 RESTART APP (Full Reload)", key="debug_restart_btn"):
+                st.toast("Restarting...")
+                sync.restart_application()
+
+            if st.button("Show Lookup Source", key="debug_show_source"):
+                import inspect
+                st.code(inspect.getsource(storage.get_person_data_public))
+
 pg.run()
 
