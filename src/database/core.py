@@ -68,8 +68,10 @@ def init_db():
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     unit_id INTEGER,
                     FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE SET NULL
-                    -- UNIQUE constraint intentionally omitted here if table already exists without unit_id
                 );
+                
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_participants_unique_identity 
+                ON participants(name, birthday, unit_id);
                 
                 CREATE TABLE IF NOT EXISTS auto_update_config (
                     id INTEGER PRIMARY KEY CHECK (id = 1),

@@ -188,7 +188,7 @@ def save_upload_data(filename: str, processed_data: List[Dict[str, Any]], progre
             for key, data in participants_to_update.items():
                 cursor.execute("UPDATE participants SET birthday = ?, metadata = ? WHERE id = ?", (data['birthday'], data['metadata'], data['id']))
             for key, data in new_participants_to_insert.items():
-                cursor.execute("INSERT INTO participants (name, birthday, metadata, unit_id) VALUES (?, ?, ?, ?)", (data['name'], data['birthday'], data['metadata'], unit_id))
+                cursor.execute("INSERT OR IGNORE INTO participants (name, birthday, metadata, unit_id) VALUES (?, ?, ?, ?)", (data['name'], data['birthday'], data['metadata'], unit_id))
                 
             if unit_id is not None:
                 cursor.execute("SELECT id, name, birthday FROM participants WHERE unit_id = ?", (unit_id,))
