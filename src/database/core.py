@@ -117,19 +117,92 @@ def init_db():
             add_column_if_missing("auto_update_config", "auto_update_enabled", "INTEGER DEFAULT 1")
 
             # Fix 'pdf_cache' and 'person_pdf_cache'
-            add_column_if_missing("pdf_cache", "pdf_content", "BLOB")
-            add_column_if_missing("pdf_cache", "filename", "TEXT")
-            
-            # person_pdf_cache table handling
-            try:
-                c.execute("SELECT 1 FROM person_pdf_cache LIMIT 1")
-                add_column_if_missing("person_pdf_cache", "pdf_content", "BLOB")
-            except sqlite3.OperationalError:
-                # Table missing, will be created below or was already handled
-                pass
+            def rebuild_pdf_table_if_legacy(table_name, create_sql, select_mapping):
+                try:
+                    c.execute(f"PRAGMA table_info({table_name})")
+                    columns = {r[1]: {"notnull": r[3]} for r in c.fetchall()}
+                    
+                    if not columns: return # Table doesn't exist yet
+                    
+                    # If pdf_data exists AND is NOT NULL, we MUST rebuild to get rid of the constraint
+                    # OR if pdf_content is missing.
+                    needs_rebuild = False
+                    if "pdf_data" in columns and columns["pdf_data"]["notnull"] == 1:
+                        needs_rebuild = True
+                    if "pdf_content" not in columns:
+                        needs_rebuild = True
+                        
+                    if needs_rebuild:
+                        logger.info(f"Rebuilding {table_name} to fix legacy NOT NULL constraints...")
+                        c.execute(f"ALTER TABLE {table_name} RENAME TO {table_name}_old")
+                        c.execute(create_sql)
+                        
+                        # Try to migrate data. select_mapping maps new_col -> old_col_to_select
+                        new_cols = []
+                        old_cols = []
+                        for nc, oc in select_mapping.items():
+                            new_cols.append(nc)
+                            old_cols.append(oc)
+                        
+                        cols_str = ", ".join(new_cols)
+                        select_str = ", ".join(old_cols)
+                        
+                        try:
+                            c.execute(f"INSERT OR IGNORE INTO {table_name} ({cols_str}) SELECT {select_str} FROM {table_name}_old")
+                            logger.info(f"Successfully migrated data for {table_name}")
+                        except Exception as e:
+                            logger.warning(f"Data migration failed for {table_name} (data loss in cache is ok): {e}")
+                        
+                        c.execute(f"DROP TABLE {table_name}_old")
+                        conn.commit()
+                except Exception as e:
+                    logger.error(f"Error rebuilding {table_name}: {e}")
 
-            # 3. Tables that might be completely missing in older DBs
+            # Rebuild pdf_cache
+            rebuild_pdf_table_if_legacy(
+                "pdf_cache",
+                """CREATE TABLE pdf_cache (
+                    unit_id INTEGER PRIMARY KEY,
+                    pdf_content BLOB,
+                    filename TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
+                )""",
+                {"unit_id": "unit_id", "pdf_content": "COALESCE(pdf_content, pdf_data)", "filename": "filename", "updated_at": "updated_at"}
+            )
+
+            # Rebuild person_pdf_cache
+            rebuild_pdf_table_if_legacy(
+                "person_pdf_cache",
+                """CREATE TABLE person_pdf_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    unit_id INTEGER,
+                    person_name TEXT,
+                    pdf_content BLOB,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(unit_id, person_name),
+                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
+                )""",
+                {"unit_id": "unit_id", "person_name": "person_name", "pdf_content": "COALESCE(pdf_content, pdf_data)", "updated_at": "updated_at"}
+            )
+
+            # 3. Final safety commit for standard Tables that might be completely missing
             conn.executescript("""
+                CREATE TABLE IF NOT EXISTS units (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    public_view_password TEXT DEFAULT 'feuerprofi'
+                );
+                
+                -- Ensure tables exist even if rebuild was skipped
+                CREATE TABLE IF NOT EXISTS pdf_cache (
+                    unit_id INTEGER PRIMARY KEY,
+                    pdf_content BLOB,
+                    filename TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
+                );
+
                 CREATE TABLE IF NOT EXISTS person_pdf_cache (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     unit_id INTEGER,
@@ -141,12 +214,6 @@ def init_db():
                 );
             """)
 
-            # 3. Handle specific constraints (like UNIQUE index for participants)
-            # If we just added unit_id, we might want the UNIQUE constraint.
-            # But changing constraints in SQLite requires table rebuild.
-            # For now, let's just make sure the column exists.
-
-            # 4. Final safety commit
             conn.commit()
             logger.info("Database initialization complete.")
         finally:
