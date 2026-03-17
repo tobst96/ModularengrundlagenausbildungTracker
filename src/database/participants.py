@@ -441,6 +441,7 @@ def get_person_data_public(name: str, birthday: str) -> Optional[Dict[str, Any]]
             modules = []
             for r in rows:
                 modules.append({
+                    'id': r['module_id'],
                     'module_name': r['title'],
                     'status': r['status'],
                     'qs_level': r['qs_level'],

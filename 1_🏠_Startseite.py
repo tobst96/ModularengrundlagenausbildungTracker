@@ -415,44 +415,6 @@ with st.sidebar:
             time.sleep(1)
             sync_upd.perform_force_update()
 
-    # --- DEBUG INFO ---
-    if st.session_state.get('username') == 'admin':
-        with st.sidebar.expander("🛠️ Debug Info", expanded=False):
-            st.write(f"CWD: `{os.getcwd()}`")
-            import src.database.participants as p
-            import src.database.core as c
-            st.write(f"Participants File: `{p.__file__}`")
-            st.write(f"DB Path: `{c._SQLITE_PATH}`")
-            if st.button("Check Felix"):
-                name = "Felix Weitz"
-                bday = "20.09.1999"
-                res = storage.get_person_data_public(name, bday)
-                st.write(f"Result for {name}, {bday}:")
-                if res:
-                    st.json(res)
-                else:
-                    st.error("NOT FOUND")
-                    # Raw SQL check
-                    conn = c.get_connection()
-                    cur = conn.cursor()
-                    cur.execute("SELECT id, name, birthday FROM participants WHERE name LIKE '%Felix%'")
-                    matches = cur.fetchall()
-                    st.write("Raw Name-Matches in DB:")
-                    st.write([dict(m) for m in matches])
-                    conn.close()
-            
-            if st.button("🔄 RESTART APP (Force Reload Modules)"):
-                st.toast("Restarting...")
-                import sys
-                script_path = os.path.abspath("1_🏠_Startseite.py")
-                args = [sys.executable, "-m", "streamlit", "run", script_path] + sys.argv[1:]
-                os.execv(sys.executable, args)
-
-# Database initialization
-from src.database.core import init_db
-init_db()
-from src.database.users import init_admin_user
-init_admin_user("admin", os.environ.get("ADMIN_PASSWORD", "adminadmin"))
 
 pg.run()
 
