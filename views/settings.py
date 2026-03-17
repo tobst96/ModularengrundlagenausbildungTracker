@@ -588,6 +588,20 @@ with tab_wart:
                 st.error(f"Fehler beim Löschen: {err}")
 
     st.divider()
+    st.divider()
+
+    # --- SYSTEM-STEUERUNG ---
+    st.subheader("🖥️ System-Steuerung")
+    st.info("Hier kannst du die Anwendung neu starten. Dies ist nützlich, um den Cache zu leeren oder bei unvorhergesehenen Problemen.")
+    
+    if st.button("🔄 Anwendung jetzt neu starten", type="primary", use_container_width=True):
+        st.toast("Anwendung wird neu gestartet...")
+        import importlib
+        importlib.reload(sync_upd)
+        time.sleep(1)
+        sync_upd.restart_application()
+
+    st.divider()
 
 # --- TAB UPDATE ---
 with tab_update:

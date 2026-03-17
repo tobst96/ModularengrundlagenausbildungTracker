@@ -157,3 +157,14 @@ def perform_force_update():
     except:
         os._exit(0)
     return True, "Force update initiated"
+
+def restart_application():
+    """Restarts the Streamlit application using os.execv."""
+    logger.info("Manual restart initiated...")
+    script_path = os.path.abspath("1_🏠_Startseite.py")
+    args = [sys.executable, "-m", "streamlit", "run", script_path] + sys.argv[1:]
+    try:
+        os.execv(sys.executable, args)
+    except Exception as e:
+        logger.error(f"Failed to execv: {e}")
+        os._exit(0)
