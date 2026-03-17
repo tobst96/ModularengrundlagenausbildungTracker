@@ -395,38 +395,52 @@ def get_person_data_public(name: str, birthday: str) -> Optional[Dict[str, Any]]
         try:
             cursor = conn.cursor()
             # 1. Look for participant - use broad LIKE to avoid whitespace/case issues
-            # We look for a match where both name and birthday appear in the record effectively
             query = "SELECT id, name, birthday, metadata FROM participants WHERE (name LIKE ? OR metadata LIKE ?) AND (birthday LIKE ? OR metadata LIKE ?)"
             cursor.execute(query, (f"%{name.strip()}%", f"%{name.strip()}%", f"%{birthday.strip()}%", f"%{birthday.strip()}%"))
-            person = cursor.fetchone()
+            all_matches = cursor.fetchall()
                 
-            if not person:
+            if not all_matches:
                 logger.warning(f"No participant found for '{name}' and '{birthday}'")
                 return None
             
-            p_id = person['id']
-            logger.info(f"Found participant ID {p_id} for {name} (DB Name: {person['name']})")
+            # Find the match with module history
+            target_match = None
+            target_rows = None
             
-            # 2. Get the latest status for EACH module this person has ever had
-            query = """
-                SELECT mh.module_id, m.title, mh.status, m.qs_level, 
-                       mh.T_Ist, m.T_Soll, mh.P_Ist, m.P_Soll, mh.K_Ist, m.K_Soll
-                FROM module_history mh
-                JOIN modules m ON mh.module_id = m.id
-                JOIN (
-                    SELECT module_id, MAX(upload_id) as latest_upload
-                    FROM module_history
-                    WHERE participant_id = ?
-                    GROUP BY module_id
-                ) latest ON mh.module_id = latest.module_id AND mh.upload_id = latest.latest_upload
-                WHERE mh.participant_id = ?
-            """
-            cursor.execute(query, (p_id, p_id))
-            rows = cursor.fetchall()
+            for match in all_matches:
+                p_id = match['id']
+                logger.debug(f"Checking module history for match candidate ID {p_id} ({match['name']})")
+                
+                # 2. Get the latest status for EACH module this person has ever had
+                query = """
+                    SELECT mh.module_id, m.title, mh.status, m.qs_level, 
+                           mh.T_Ist, m.T_Soll, mh.P_Ist, m.P_Soll, mh.K_Ist, m.K_Soll
+                    FROM module_history mh
+                    JOIN modules m ON mh.module_id = m.id
+                    JOIN (
+                        SELECT module_id, MAX(upload_id) as latest_upload
+                        FROM module_history
+                        WHERE participant_id = ?
+                        GROUP BY module_id
+                    ) latest ON mh.module_id = latest.module_id AND mh.upload_id = latest.latest_upload
+                    WHERE mh.participant_id = ?
+                """
+                cursor.execute(query, (p_id, p_id))
+                rows = cursor.fetchall()
+                
+                if rows:
+                    target_match = match
+                    target_rows = rows
+                    logger.info(f"Found participant ID {p_id} with {len(rows)} modules for {name}")
+                    break
             
-            if not rows:
-                logger.warning(f"No module history found for participant {p_id}")
+            if not target_match:
+                logger.warning(f"Found {len(all_matches)} participant records for {name}, but none have module history.")
                 return None
+            
+            p_id = target_match['id']
+            person = target_match
+            rows = target_rows
                 
             # 3. Get QS status
             cursor.execute("SELECT qs1_done, qs2_done, qs3_done FROM person_qs_status WHERE participant_id = ?", (p_id,))
