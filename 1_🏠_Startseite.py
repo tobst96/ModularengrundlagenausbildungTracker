@@ -210,7 +210,7 @@ if 'authenticated' not in st.session_state:
 is_public_view = st.query_params.get("view") == "public"
 if is_public_view:
     # Lade direkt NUR die MGLA Ansicht, die sich selbst authentifiziert (Einheitscode)
-    mgla = st.Page("pages/MGLA.py", title="Qualifikationsnachweis", icon="🚒")
+    mgla = st.Page("pages/2_📊_MGLA_Dashboard.py", title="Qualifikationsnachweis", icon="🚒")
     pg = st.navigation([mgla])
     pg.run()
     st.stop()
@@ -403,11 +403,56 @@ with st.sidebar:
     if update_cfg and update_cfg.get('update_available'):
         st.divider()
         st.warning("🚀 **Update verfügbar!**")
-        if st.button("🚀 Schnell-Update", key="sidebar_update_btn", use_container_width=True, type="primary"):
+        col1, col2 = st.columns(2)
+        if col1.button("🚀 Schnell-Update", key="sidebar_update_btn", use_container_width=True, type="primary"):
             st.toast("Update wird gestartet... Der Server startet gleich neu.")
             import time
             time.sleep(1)
             sync_upd.perform_auto_update()
+        if col2.button("🛠️ Force Update", key="sidebar_force_update_btn", use_container_width=True, help="Erzwingt ein Update (überschreibt lokale Konflikte)"):
+            st.toast("Erzwungenes Update wird gestartet...")
+            import time
+            time.sleep(1)
+            sync_upd.perform_force_update()
+
+    # --- DEBUG INFO ---
+    if st.session_state.get('username') == 'admin':
+        with st.sidebar.expander("🛠️ Debug Info", expanded=False):
+            st.write(f"CWD: `{os.getcwd()}`")
+            import src.database.participants as p
+            import src.database.core as c
+            st.write(f"Participants File: `{p.__file__}`")
+            st.write(f"DB Path: `{c._SQLITE_PATH}`")
+            if st.button("Check Felix"):
+                name = "Felix Weitz"
+                bday = "20.09.1999"
+                res = storage.get_person_data_public(name, bday)
+                st.write(f"Result for {name}, {bday}:")
+                if res:
+                    st.json(res)
+                else:
+                    st.error("NOT FOUND")
+                    # Raw SQL check
+                    conn = c.get_connection()
+                    cur = conn.cursor()
+                    cur.execute("SELECT id, name, birthday FROM participants WHERE name LIKE '%Felix%'")
+                    matches = cur.fetchall()
+                    st.write("Raw Name-Matches in DB:")
+                    st.write([dict(m) for m in matches])
+                    conn.close()
+            
+            if st.button("🔄 RESTART APP (Force Reload Modules)"):
+                st.toast("Restarting...")
+                import sys
+                script_path = os.path.abspath("1_🏠_Startseite.py")
+                args = [sys.executable, "-m", "streamlit", "run", script_path] + sys.argv[1:]
+                os.execv(sys.executable, args)
+
+# Database initialization
+from src.database.core import init_db
+init_db()
+from src.database.users import init_admin_user
+init_admin_user("admin", os.environ.get("ADMIN_PASSWORD", "adminadmin"))
 
 pg.run()
 

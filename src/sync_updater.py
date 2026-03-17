@@ -61,6 +61,25 @@ def run_git_pull():
     except Exception as e:
         return False, str(e)
 
+def force_git_reset():
+    """Forces a hard reset to the remote branch state to fix broken update states."""
+    try:
+        subprocess.run(["git", "fetch", "origin"], capture_output=True, text=True)
+        branch = get_current_branch()
+        # Ensure we reset to origin/main or origin/[current_branch]
+        target = f"origin/{branch}"
+        res = subprocess.run(["git", "rev-parse", "--verify", f"origin/main"], capture_output=True)
+        if res.returncode == 0:
+            target = "origin/main"
+            
+        result = subprocess.run(["git", "reset", "--hard", target], capture_output=True, text=True, check=True)
+        subprocess.run(["git", "clean", "-fd"], capture_output=True, text=True) # Remove untracked files
+        return True, result.stdout
+    except subprocess.CalledProcessError as e:
+        return False, e.stderr
+    except Exception as e:
+        return False, str(e)
+
 def update_dependencies():
     try:
         result = subprocess.run(["pip", "install", "-r", "requirements.txt"], capture_output=True, text=True, check=True)
@@ -121,3 +140,20 @@ def perform_auto_update():
         os._exit(0)
     
     return True, "Update initiated"
+
+def perform_force_update():
+    """Executes a hard reset update and restarts."""
+    ok_reset, msg_reset = force_git_reset()
+    if not ok_reset:
+        return False, f"Git Reset failed: {msg_reset}"
+    
+    update_dependencies()
+    
+    # Restart
+    script_path = os.path.abspath("1_🏠_Startseite.py")
+    args = [sys.executable, "-m", "streamlit", "run", script_path] + sys.argv[1:]
+    try:
+        os.execv(sys.executable, args)
+    except:
+        os._exit(0)
+    return True, "Force update initiated"

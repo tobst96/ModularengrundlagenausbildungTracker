@@ -385,16 +385,85 @@ def get_all_person_qs_status_cached(unit_id: Optional[int] = None) -> Dict[tuple
             conn.close()
 
 def get_person_data_public(name: str, birthday: str) -> Optional[Dict[str, Any]]:
-    # This was originally using name/birthday to fetch latest records
-    from .participants import get_latest_upload_data_cached # Internal ref
-    data = get_latest_upload_data_cached()
-    if not data: return None
-    # Filter by name and birthday (ignoring units for common public lookup)
-    for r in data:
-        # person_name in records is often "Name, geb. Birthday" or metadata
-        if name in r['person_name'] and birthday in r['person_name']:
-            return r
-    return None
+    """
+    Fetches all training data for a person, returning a structure 
+    compatible with the MGLA_Dashboard public view.
+    """
+    logger.info(f"Public lookup for: '{name}' | '{birthday}'")
+    with _lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            # 1. Look for participant - use broad LIKE to avoid whitespace/case issues
+            # We look for a match where both name and birthday appear in the record effectively
+            query = "SELECT id, name, birthday, metadata FROM participants WHERE (name LIKE ? OR metadata LIKE ?) AND (birthday LIKE ? OR metadata LIKE ?)"
+            cursor.execute(query, (f"%{name.strip()}%", f"%{name.strip()}%", f"%{birthday.strip()}%", f"%{birthday.strip()}%"))
+            person = cursor.fetchone()
+                
+            if not person:
+                logger.warning(f"No participant found for '{name}' and '{birthday}'")
+                return None
+            
+            p_id = person['id']
+            logger.info(f"Found participant ID {p_id} for {name} (DB Name: {person['name']})")
+            
+            # 2. Get the latest status for EACH module this person has ever had
+            query = """
+                SELECT mh.module_id, m.title, mh.status, m.qs_level, 
+                       mh.T_Ist, m.T_Soll, mh.P_Ist, m.P_Soll, mh.K_Ist, m.K_Soll
+                FROM module_history mh
+                JOIN modules m ON mh.module_id = m.id
+                JOIN (
+                    SELECT module_id, MAX(upload_id) as latest_upload
+                    FROM module_history
+                    WHERE participant_id = ?
+                    GROUP BY module_id
+                ) latest ON mh.module_id = latest.module_id AND mh.upload_id = latest.latest_upload
+                WHERE mh.participant_id = ?
+            """
+            cursor.execute(query, (p_id, p_id))
+            rows = cursor.fetchall()
+            
+            if not rows:
+                logger.warning(f"No module history found for participant {p_id}")
+                return None
+                
+            # 3. Get QS status
+            cursor.execute("SELECT qs1_done, qs2_done, qs3_done FROM person_qs_status WHERE participant_id = ?", (p_id,))
+            qs_row = cursor.fetchone()
+            qs_status = {
+                'qs1_done': bool(qs_row['qs1_done']) if qs_row else False,
+                'qs2_done': bool(qs_row['qs2_done']) if qs_row else False,
+                'qs3_done': bool(qs_row['qs3_done']) if qs_row else False
+            }
+            
+            # 4. Construct Response with expected keys for Dashboard
+            modules = []
+            for r in rows:
+                modules.append({
+                    'module_name': r['title'],
+                    'status': r['status'],
+                    'qs_level': r['qs_level'],
+                    'hours_t': r['T_Ist'],
+                    'hours_p': r['P_Ist'],
+                    'hours_k': r['K_Ist'],
+                    'hours_t_soll': r['T_Soll'],
+                    'hours_p_soll': r['P_Soll'],
+                    'hours_k_soll': r['K_Soll']
+                })
+                
+            return {
+                'person': {
+                    'name': person['name'],
+                    'birthday': person['birthday'],
+                    'id': p_id,
+                    'metadata': person['metadata']
+                },
+                'modules': modules,
+                'qs_status': qs_status
+            }
+        finally:
+            conn.close()
 
 def get_stundennachweis_zeitraum(unit_id: int) -> Optional[str]:
     with _lock:

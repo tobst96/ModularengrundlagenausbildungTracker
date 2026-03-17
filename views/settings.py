@@ -640,6 +640,14 @@ with tab_update:
         if not ok:
             st.error(f"Fehler beim Update: {msg}")
 
+    if st.button("🛠️ Erzwungenes Update (Force Reset)", use_container_width=True, help="Setzt das System hart auf den GitHub-Stand zurück. Hilfreich bei Datei-Konflikten."):
+        st.toast("Force-Update wird gestartet... Alle lokalen Änderungen werden überschrieben.")
+        import time
+        time.sleep(2)
+        ok, msg = sync_upd.perform_force_update()
+        if not ok:
+            st.error(f"Fehler beim Force-Update: {msg}")
+
 # --- TAB BACKUP ---
 with tab_backup:
     # --- DATENBANK BACKUP & WIEDERHERSTELLUNG ---

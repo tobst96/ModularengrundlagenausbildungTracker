@@ -250,7 +250,7 @@ if st.query_params.get("view") == "public":
 def setup_db():
     try:
         init_db()
-        admin_pass = os.environ.get("ADMIN_PASSWORD", "admin")
+        admin_pass = os.environ.get("ADMIN_PASSWORD", "adminadmin")
         init_admin_user("admin", admin_pass)
         return True, None
     except Exception as e:
