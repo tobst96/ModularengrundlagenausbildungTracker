@@ -266,13 +266,18 @@ with tab_email:
             smtp_password = st.text_input("SMTP Passwort", value=config.get("smtp_password", ""), type="password")
             
         st.divider()
-        st.write("### Empfänger & Verzögerung")
+        st.write("### Empfänger & Intervalle")
         recipient_emails = st.text_input("Empfänger E-Mail(s)", value=config.get("recipient_emails", ""), help="Mehrere durch Komma getrennt (z.B. 'chef@feuerwehr.de, wache@feuerwehr.de')")
-        delay_minutes = st.number_input("Verzögerung für Zusammenfassung (in Minuten)", min_value=0, max_value=1440, value=config.get("delay_minutes", 60), help="Wie lange sollen Einsatzberichte nach Erstellung gesammelt werden, bevor sie in einer Liste versendet werden?")
+        
+        col_i1, col_i2 = st.columns(2)
+        with col_i1:
+            delay_minutes = st.number_input("Wartezeit bis Versand (in Minuten)", min_value=0, max_value=1440, value=config.get("delay_minutes", 60), help="Wie lange sollen Berichte nach Erstellung gesammelt werden?")
+        with col_i2:
+            check_interval = st.number_input("Prüf-Intervall (in Minuten)", min_value=1, max_value=60, value=config.get("check_interval_minutes", 5), help="Wie oft soll das System nach neuen Berichten suchen?")
         
         submitted_email = st.form_submit_button("E-Mail Einstellungen speichern", type="primary")
         if submitted_email:
-            ok, err = storage.save_email_config(unit_id, smtp_server, smtp_port, smtp_user, smtp_password, sender_email, recipient_emails, delay_minutes)
+            ok, err = storage.save_email_config(unit_id, smtp_server, smtp_port, smtp_user, smtp_password, sender_email, recipient_emails, delay_minutes, check_interval)
             if ok:
                 st.success("E-Mail Einstellungen erfolgreich gespeichert!")
                 time.sleep(1)
@@ -526,6 +531,47 @@ with tab_sich:
                     st.rerun()
                 else:
                     st.error(f"Fehler beim Speichern: {err}")
+
+    st.divider()
+    st.divider()
+    st.write("### 📝 Gesamterfassung (Batch-Modus)")
+    st.write("Dieser Link ermöglicht es, Personal für einen gesamten Einsatz (über alle Fahrzeuge hinweg) auf einer Seite zu erfassen.")
+    
+    # Lade Unit Daten (für Token) - Direct access because proxy can be cached
+    from src.database.units import get_units as _get_u
+    units_list = _get_u()
+    unit_data = next((u for u in units_list if u.get('id') == 1), None)
+    current_ge_token = unit_data.get('gesamterfassung_token') if unit_data else ""
+    
+    with st.form("ge_token_form"):
+        new_ge_token = st.text_input("Gesamterfassungs-Token", value=current_ge_token or "", placeholder="z.B. mein-geheim-schluessel")
+        submitted_ge = st.form_submit_button("Token speichern", type="primary")
+        
+        if submitted_ge:
+            if not new_ge_token.strip():
+                st.error("Der Token darf nicht leer sein.")
+            else:
+                from src.database.units import save_gesamterfassung_token as _save_ge
+                ok, err = _save_ge(1, new_ge_token.strip())
+                if ok:
+                    st.success("Gesamterfassungs-Token erfolgreich aktualisiert!")
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error(f"Fehler beim Speichern: {err}")
+                    
+    if current_ge_token:
+        try:
+            from streamlit.runtime.scriptrunner import get_script_run_ctx
+            ctx = get_script_run_ctx()
+            host = st.context.headers.get("Host", "localhost:8501") if hasattr(st, 'context') else "localhost:8501"
+            base_url = f"http://{host}"
+        except:
+            base_url = "http://localhost:8501"
+            
+        ge_link = f"{base_url}/?token={current_ge_token}"
+        st.info(f"**Direkt-Link zur Gesamterfassung:**\n`{ge_link}`")
+        st.caption("Diesen Link kannst du als Lesezeichen speichern oder an Führungskräfte verteilen.")
 
     st.divider()
     st.write("### 📝 Letzte Logins (Global)")

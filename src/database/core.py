@@ -94,6 +94,58 @@ def init_db():
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS active_incidents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    unit_id INTEGER,
+                    keyword TEXT,
+                    situation TEXT,
+                    actions TEXT,
+                    commander_id INTEGER,
+                    unit_leader_id INTEGER,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS incident_reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    unit_id INTEGER,
+                    incident_id INTEGER,
+                    keyword TEXT,
+                    vehicle_id INTEGER,
+                    commander_id INTEGER,
+                    unit_leader_id INTEGER,
+                    crew_json TEXT,
+                    situation TEXT,
+                    actions TEXT,
+                    sent_at TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE,
+                    FOREIGN KEY (incident_id) REFERENCES active_incidents(id) ON DELETE SET NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS email_config (
+                    unit_id INTEGER PRIMARY KEY,
+                    smtp_server TEXT,
+                    smtp_port INTEGER,
+                    smtp_user TEXT,
+                    smtp_password TEXT,
+                    sender_email TEXT,
+                    recipient_emails TEXT,
+                    delay_minutes INTEGER DEFAULT 60,
+                    check_interval_minutes INTEGER DEFAULT 5,
+                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS vehicles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    unit_id INTEGER,
+                    call_sign TEXT,
+                    seats INTEGER,
+                    token TEXT,
+                    FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
+                );
             """)
 
             # 2. Key Table Migrations (Explicit Checks)
@@ -110,6 +162,10 @@ def init_db():
             # Fix 'users' table
             add_column_if_missing("users", "unit_id", "INTEGER DEFAULT NULL")
             add_column_if_missing("users", "is_admin", "INTEGER DEFAULT 0")
+            add_column_if_missing("units", "gesamterfassung_token", "TEXT DEFAULT NULL")
+            add_column_if_missing("incident_reports", "incident_id", "INTEGER DEFAULT NULL")
+            add_column_if_missing("email_config", "delay_minutes", "INTEGER DEFAULT 60")
+            add_column_if_missing("email_config", "check_interval_minutes", "INTEGER DEFAULT 5")
 
             # Fix 'participants' table
             add_column_if_missing("participants", "unit_id", "INTEGER DEFAULT NULL")

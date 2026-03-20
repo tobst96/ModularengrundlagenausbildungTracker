@@ -1,4 +1,3 @@
-# Startseite entry point
 import streamlit as st
 import src.db_base as storage
 import src.sync_updater as sync_upd
@@ -178,13 +177,18 @@ def check_unsent_reports():
     except Exception as e:
         logger.error(f"check_unsent_reports failed: {e}")
 
-if "scheduler" not in st.session_state and db_ok:
+@st.cache_resource
+def start_global_scheduler(_mail_interval: int):
+    if not db_ok:
+        return None
+    
     scheduler = BackgroundScheduler()
     # Runs everyday at midnight (00:00)
     scheduler.add_job(storage.delete_expired_participants, 'cron', hour=0, minute=0, args=[360])
     scheduler.add_job(daily_db_backup, 'cron', hour=0, minute=0)
-    # Check for incident reports every 5 minutes
-    scheduler.add_job(check_unsent_reports, 'interval', minutes=5)
+    
+    # Check for incident reports based on config
+    scheduler.add_job(check_unsent_reports, 'interval', minutes=_mail_interval)
     
     # --- UPDATE JOBS ---
     # Daily update check at 02:00
@@ -204,14 +208,21 @@ if "scheduler" not in st.session_state and db_ok:
         )
     
     scheduler.start()
-    logger.info("BackgroundScheduler started for daily jobs and auto-send.")
-    st.session_state.scheduler = scheduler
+    logger.info(f"BackgroundScheduler started with mail_interval={_mail_interval}min.")
+    return scheduler
+
+# Config laden für Scheduler-Caching-Key
+_m_cfg = storage.get_email_config(1) or {}
+_m_int = _m_cfg.get("check_interval_minutes", 5)
+
+# Initialisiere den globalen Scheduler
+st.session_state.scheduler = start_global_scheduler(_m_int)
     
-    # Check for updates immediately on startup to clear notification if we just updated
-    try:
-        sync_upd.check_for_updates()
-    except Exception as e:
-        logger.error(f"Startup update check failed: {e}")
+# Check for updates immediately on startup to clear notification if we just updated
+try:
+    sync_upd.check_for_updates()
+except Exception as e:
+    logger.error(f"Startup update check failed: {e}")
 
 _cookies = streamlit_cookies_manager.CookieManager()
 if not _cookies.ready():
@@ -238,6 +249,7 @@ token_param = st.query_params.get("token", "")
 
 # Initialer Load durch Token URL
 if token_param:
+    # 1. Fahrzeug-Token (Einsatzbericht)
     vehicle = storage.get_vehicle_by_token(token_param)
     if vehicle:
         st.session_state.authenticated = True
@@ -246,7 +258,16 @@ if token_param:
         st.session_state.token_vehicle_id = vehicle['id']
         st.session_state.token_vehicle_name = vehicle['call_sign']
     else:
-        st.error("Ungültiger Token-Link.")
+        # 2. Gesamterfassungs-Token (Unit-spezifisch)
+        unit = storage.get_unit_by_gesamterfassung_token(token_param)
+        if unit:
+            st.session_state.authenticated = True
+            st.session_state.username = f"Gesamterfassung: {unit['name']}"
+            st.session_state.is_token_auth = True
+            st.session_state.is_gesamterfassung = True
+            st.session_state.unit_id = unit['id']
+        else:
+            st.error("Ungültiger Token-Link.")
 
 if not st.session_state.authenticated:
     # Prüfe ob ein gültiges Login-Cookie existiert
@@ -381,6 +402,7 @@ mgla = st.Page("pages/2_📊_MGLA_Dashboard.py", title="MGLA Dashboard", icon="�
 personal = st.Page("views/personal.py", title="Personal", icon="👥")
 gruppen = st.Page("views/gruppen.py", title="Gruppen-Einteilung", icon="🧑‍🤝‍🧑")
 einsatzbericht = st.Page("views/einsatzbericht.py", title="Einsatz erfassen", icon="📋")
+gesamterfassung = st.Page("views/gesamterfassung.py", title="Gesamterfassung", icon="📝")
 einsatz_historie = st.Page("views/einsatz_historie.py", title="Einsatz-Historie", icon="📜")
 settings = st.Page("views/settings.py", title="Einstellungen", icon="⚙️")
 
@@ -388,11 +410,14 @@ pages = [dashboard]
 
 # Conditionally show pages based on role
 if st.session_state.get('is_token_auth', False):
-    # Wenn über Token angemeldet, zeige NUR den Einsatzbericht
-    pages = [einsatzbericht]
+    if st.session_state.get('is_gesamterfassung', False):
+        pages = [gesamterfassung]
+    else:
+        # Wenn über Fahrzeug-Token angemeldet, zeige NUR den Einsatzbericht
+        pages = [einsatzbericht]
 else:
     # Always include mgla, personal, gruppen, einsatzbericht, historie for authenticated users
-    pages.extend([mgla, personal, gruppen, einsatzbericht, einsatz_historie])
+    pages.extend([mgla, personal, gruppen, einsatzbericht, gesamterfassung, einsatz_historie])
     
     # Settings only for admins
     if st.session_state.get('is_admin', False):

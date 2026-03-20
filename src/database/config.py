@@ -96,13 +96,13 @@ def get_email_config(unit_id: int) -> Optional[Dict[str, Any]]:
         finally:
             conn.close()
 
-def save_email_config(unit_id: int, server: str, port: int, user: str, password: str, sender: str, recipients: str, delay: int) -> tuple[bool, str]:
+def save_email_config(unit_id: int, server: str, port: int, user: str, password: str, sender: str, recipients: str, delay: int, interval: int = 5) -> tuple[bool, str]:
     with _lock:
         conn = get_connection()
         try:
             conn.execute("""
-                INSERT INTO email_config (unit_id, smtp_server, smtp_port, smtp_user, smtp_password, sender_email, recipient_emails, delay_minutes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO email_config (unit_id, smtp_server, smtp_port, smtp_user, smtp_password, sender_email, recipient_emails, delay_minutes, check_interval_minutes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(unit_id) DO UPDATE SET
                 smtp_server=excluded.smtp_server,
                 smtp_port=excluded.smtp_port,
@@ -110,8 +110,9 @@ def save_email_config(unit_id: int, server: str, port: int, user: str, password:
                 smtp_password=excluded.smtp_password,
                 sender_email=excluded.sender_email,
                 recipient_emails=excluded.recipient_emails,
-                delay_minutes=excluded.delay_minutes
-            """, (unit_id, server, port, user, password, sender, recipients, delay))
+                delay_minutes=excluded.delay_minutes,
+                check_interval_minutes=excluded.check_interval_minutes
+            """, (unit_id, server, port, user, password, sender, recipients, delay, interval))
             conn.commit()
             return True, ""
         except Exception as e:
