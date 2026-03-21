@@ -146,6 +146,28 @@ def get_unsent_incident_reports(unit_id: int = 1) -> List[Dict[str, Any]]:
         finally:
             conn.close()
 
+def get_incident_reports(incident_id: int) -> List[Dict[str, Any]]:
+    with _lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            query = """
+                SELECT 
+                    i.*, 
+                    v.call_sign as vehicle_name,
+                    p_cmd.name as commander_name,
+                    p_ldr.name as unit_leader_name
+                FROM incident_reports i
+                LEFT JOIN vehicles v ON i.vehicle_id = v.id
+                LEFT JOIN participants p_cmd ON i.commander_id = p_cmd.id
+                LEFT JOIN participants p_ldr ON i.unit_leader_id = p_ldr.id
+                WHERE i.incident_id = ?
+            """
+            cursor.execute(query, (incident_id,))
+            return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
 def cleanup_old_reports() -> Tuple[bool, str]:
     """
     Behält nur die letzten 10 Batches (nach sent_at) in der Datenbank.

@@ -16,7 +16,7 @@ def get_db_path():
 
 _SQLITE_PATH = get_db_path()
 os.makedirs(os.path.dirname(_SQLITE_PATH), exist_ok=True)
-_lock = threading.Lock()
+_lock = threading.RLock()
 
 def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(_SQLITE_PATH, check_same_thread=False)

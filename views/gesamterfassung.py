@@ -5,7 +5,7 @@ from datetime import datetime
 import json
 import time
 import pandas as pd
-from src.database.incidents import get_vehicles, create_incident_report, get_active_incidents, create_active_incident
+from src.database.incidents import get_vehicles, create_incident_report, get_active_incidents, create_active_incident, get_incident_reports
 from src.database.core import get_connection
 
 def get_all_participants():
@@ -40,14 +40,72 @@ with st.container():
     
     current_incident_id = None
     default_stichwort = ""
+    
     if selected_inc_str != "- Neuen Einsatz anlegen -":
-        current_incident_id = int(selected_inc_str.split(":")[0].replace("ID ", ""))
-        inc_data = next((i for i in active_incidents if i['id'] == current_incident_id), None)
-        if inc_data:
-            default_stichwort = inc_data['keyword']
-            st.info(f"Berichte werden dem Einsatz **{default_stichwort}** zugeordnet.")
+        try:
+            current_incident_id = int(selected_inc_str.split(":")[0].replace("ID ", ""))
+            
+            # --- DATEN LADEN BEI WECHSEL ---
+            if st.session_state.get('ge_last_inc_id') != current_incident_id:
+                if current_incident_id:
+                    inc_data = next((i for i in active_incidents if i['id'] == current_incident_id), None)
+                    if inc_data:
+                        st.session_state.ge_stichwort = inc_data['keyword']
+                        st.session_state.ge_lage = inc_data.get('situation', "")
+                        st.session_state.ge_taetigkeiten = inc_data.get('actions', "")
+                        
+                        # Suche Namen für IDs
+                        def get_name_for_id(pid):
+                            if not pid: return "- Niemand -"
+                            for p in participants:
+                                if p['id'] == pid: return p['name']
+                            return "- Niemand -"
+                            
+                        st.session_state.ge_einsatzleiter = get_name_for_id(inc_data.get('commander_id'))
+                        st.session_state.ge_einheitsfuehrer = get_name_for_id(inc_data.get('unit_leader_id'))
 
-    stichwort = st.text_input("Einsatzstichwort", value=default_stichwort, key="ge_stichwort", placeholder="z.B. FEU BMA")
+                    # Mannschaft aus Berichten laden
+                    reports = get_incident_reports(current_incident_id)
+                    new_table = []
+                    for rep in reports:
+                        v_name = rep.get('vehicle_name', "Unbekannt")
+                        try:
+                            crew = json.loads(rep['crew_json'])
+                            for key, val in crew.items():
+                                if key.startswith("seat_") and isinstance(val, dict):
+                                    p_name = val.get('name', "- Niemand -")
+                                    if p_name == "- Niemand -": continue
+                                    
+                                    new_table.append({
+                                        "Fahrzeug": v_name,
+                                        "Name": p_name,
+                                        "GF": (key == "seat_1"),
+                                        "MA": (key == "seat_2"),
+                                        "VAB": val.get('vab', False),
+                                        "AGT_Min": val.get('agt', 0)
+                                    })
+                        except: pass
+                    
+                    if new_table:
+                        st.session_state.ge_table_data = new_table
+                else:
+                    # Zurück auf "Neu" -> Alles leeren
+                    st.session_state.ge_stichwort = ""
+                    st.session_state.ge_lage = ""
+                    st.session_state.ge_taetigkeiten = ""
+                    st.session_state.ge_einsatzleiter = "- Niemand -"
+                    st.session_state.ge_einheitsfuehrer = "- Niemand -"
+                    st.session_state.ge_table_data = [{"Fahrzeug": vehicle_names[0], "Name": "- Niemand -", "GF": False, "MA": False, "VAB": False, "AGT_Min": 0}]
+                
+                st.session_state.ge_last_inc_id = current_incident_id
+                st.rerun()
+
+        except Exception as e:
+            st.error(f"Fehler beim Laden: {e}")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        stichwort = st.text_input("Einsatzstichwort", value=default_stichwort, key="ge_stichwort", placeholder="z.B. FEU BMA")
     with col2:
         einsatzleiter = st.selectbox("Einsatzleiter", options=person_names, key="ge_einsatzleiter")
         c1, c2 = st.columns(2)
